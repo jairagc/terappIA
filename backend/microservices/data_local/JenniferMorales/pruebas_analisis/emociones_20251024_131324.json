@@ -1,0 +1,59 @@
+{
+    "mensaje": "Análisis completado",
+    "resultado": {
+        "alegria": {
+            "porcentaje": 20.0,
+            "entidades": [
+                "No lo golpeé y eso es lo más importante",
+                "estoy bien"
+            ]
+        },
+        "tristeza": {
+            "porcentaje": 0.0,
+            "entidades": []
+        },
+        "enojo": {
+            "porcentaje": 70.0,
+            "entidades": [
+                "Realmente querías golpearlo, ¿no?",
+                "Pinzón..."
+            ]
+        },
+        "miedo": {
+            "porcentaje": 0.0,
+            "entidades": []
+        },
+        "sorpresa": {
+            "porcentaje": 0.0,
+            "entidades": []
+        },
+        "disgusto": {
+            "porcentaje": 0.0,
+            "entidades": []
+        },
+        "estres": {
+            "porcentaje": 30.0,
+            "entidades": [
+                "Realmente querías golpearlo, ¿no?",
+                "No. No."
+            ]
+        },
+        "calma": {
+            "porcentaje": 40.0,
+            "entidades": [
+                "No, estoy bien",
+                "Bueno, no lo golpeé y eso es lo más importante",
+                "Sí, lo es",
+                "No, tenías tu razón"
+            ]
+        },
+        "aversión": {
+            "porcentaje": 0.0,
+            "entidades": []
+        },
+        "anticipación": {
+            "porcentaje": 0.0,
+            "entidades": []
+        }
+    }
+}

@@ -24,12 +24,12 @@ DIR_AUDIOS      = "audios"
 DIR_PRUEBAS_AUD = "pruebas_audio"
 
 USE_GCS         = os.getenv("AUDIO_USE_GCS", "true").lower() == "true"
-GCS_BUCKET      = os.getenv("AUDIO_GCS_BUCKET", "tu-bucket")  
+GCS_BUCKET      = os.getenv("AUDIO_GCS_BUCKET", "ceroooooo")  
 GCS_BASE_PREFIX = os.getenv("AUDIO_GCS_BASE_PREFIX", "")      
 
 vertexai.init(project=PROJECT_ID, location=LOCATION)
 model = GenerativeModel(MODEL_ID)
-gcs_client = storage.Client() if USE_GCS else None
+gcs_client = storage.Client(project=PROJECT_ID) if USE_GCS else None
 
 app = FastAPI(title="Servicio de Transcripción de Audio con Gemini 2.5 (file o GCS)")
 
@@ -110,7 +110,7 @@ def download_gcs_bytes(uri: str) -> bytes:
         raise ValueError("gcs_uri inválido")
     _, rest = uri.split("gs://", 1)
     bucket_name, blob_path = rest.split("/", 1)
-    bucket = storage.Client().bucket(bucket_name)
+    bucket = storage.Client(project=PROJECT_ID).bucket(bucket_name)
     blob = bucket.blob(blob_path)
     return blob.download_as_bytes()
 

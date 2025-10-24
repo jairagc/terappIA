@@ -1,0 +1,12 @@
+{
+    "mensaje": "Transcripción completada",
+    "user_id": "JenniferMorales",
+    "audio_guardado": null,
+    "audio_gcs": "gs://ceroooooo/AudioPrueba.m4a",
+    "resultado": {
+        "texto": "Pinzón...\nRealmente querías golpearlo, ¿no?\nNo. No.\nNo, estoy bien.\nBueno, no lo golpeé y eso es lo más importante, ¿no?\nSí, lo es.\nSiento haber dudado de ti.\nNo, tenías tu razón.",
+        "archivo_guardado_local": "data_local\\JenniferMorales\\pruebas_audio\\transcripcion_20251024_131319.json",
+        "archivo_guardado_gcs": "gs://ceroooooo/JenniferMorales/pruebas_audio/transcripcion_20251024_131319.json"
+    },
+    "fuente_gcs_uri": "gs://ceroooooo/AudioPrueba.m4a"
+}

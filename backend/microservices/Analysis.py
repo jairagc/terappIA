@@ -33,12 +33,12 @@ DATA_ROOT       = os.getenv("AN_DATA_ROOT", "data_local")
 DIR_ANALYSIS    = "pruebas_analisis"
 
 USE_GCS         = os.getenv("AN_USE_GCS", "true").lower() == "true"
-GCS_BUCKET      = os.getenv("AN_GCS_BUCKET", "tu-bucket")
-GCS_BASE_PREFIX = os.getenv("AN_GCS_BASE_PREFIX", "")
+GCS_BUCKET      = os.getenv("AN_GCS_BUCKET", "ceroooooo")
+GCS_BASE_PREFIX = os.getenv("AN_GCS_BASE_PREFIX", "p1")
 
 vertexai.init(project=PROJECT_ID, location=LOCATION)
 model = GenerativeModel(MODEL_ID)
-gcs_client = storage.Client() if USE_GCS else None
+gcs_client = storage.Client(project=PROJECT_ID) if USE_GCS else None
 
 app = FastAPI(title="API Análisis de Emociones (texto o gcs_uri)")
 

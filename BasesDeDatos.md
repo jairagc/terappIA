@@ -225,7 +225,7 @@ FILTER USING (doctor_uid = SESSION_USER());
 
 ## Rutas y URIs Ejemplo
 ```bash
-gs://terappia-prod/clinica_azul/{doctor_uid}/{patient_id}/sessions/{session_id}/
+gs://terappia/clinica_azul/{doctor_uid}/{patient_id}/sessions/{session_id}/
   raw/img_001.png
   derived/ocr/ocr_img_001.json
   derived/emotions/emotions_img_001.json

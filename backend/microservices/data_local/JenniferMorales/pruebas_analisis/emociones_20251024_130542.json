@@ -1,0 +1,63 @@
+{
+    "mensaje": "Análisis completado",
+    "resultado": {
+        "alegria": {
+            "porcentaje": 65.0,
+            "entidades": [
+                "ejercicio",
+                "cambiar para mejor",
+                "comienzo"
+            ]
+        },
+        "tristeza": {
+            "porcentaje": 10.0,
+            "entidades": [
+                "Han pasado muchas cosas"
+            ]
+        },
+        "enojo": {
+            "porcentaje": 0.0,
+            "entidades": []
+        },
+        "miedo": {
+            "porcentaje": 5.0,
+            "entidades": [
+                "cambiar para mejor"
+            ]
+        },
+        "sorpresa": {
+            "porcentaje": 5.0,
+            "entidades": [
+                "Han pasado muchas cosas"
+            ]
+        },
+        "disgusto": {
+            "porcentaje": 0.0,
+            "entidades": []
+        },
+        "estres": {
+            "porcentaje": 15.0,
+            "entidades": [
+                "Han pasado muchas cosas"
+            ]
+        },
+        "calma": {
+            "porcentaje": 40.0,
+            "entidades": [
+                "Terminé de hacer ejercicio",
+                "se sintió bien"
+            ]
+        },
+        "aversión": {
+            "porcentaje": 0.0,
+            "entidades": []
+        },
+        "anticipación": {
+            "porcentaje": 55.0,
+            "entidades": [
+                "cambiar para mejor",
+                "comienzo"
+            ]
+        }
+    }
+}
