@@ -2,6 +2,7 @@ import os
 import json
 from datetime import datetime
 from typing import Optional, Dict, Any
+import uuid
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Header, Form
 from pydantic import BaseModel
@@ -24,8 +25,10 @@ DIR_AUDIOS      = "audios"
 DIR_PRUEBAS_AUD = "pruebas_audio"
 
 USE_GCS         = os.getenv("AUDIO_USE_GCS", "true").lower() == "true"
-GCS_BUCKET      = os.getenv("AUDIO_GCS_BUCKET", "ceroooooo")  
-GCS_BASE_PREFIX = os.getenv("AUDIO_GCS_BASE_PREFIX", "")      
+GCS_BUCKET      = os.getenv("AUDIO_GCS_BUCKET", "ceroooooo")
+GCS_BASE_PREFIX = os.getenv("AUDIO_GCS_BASE_PREFIX", "")
+
+SAVE_LOCAL_RESULTS = os.getenv("AUDIO_SAVE_LOCAL", "false").lower() == "true"
 
 vertexai.init(project=PROJECT_ID, location=LOCATION)
 model = GenerativeModel(MODEL_ID)
@@ -81,25 +84,21 @@ def gcs_uri_for(uid: Optional[str], folder: str, filename: str) -> str:
     user = uid if uid else "_public"
     return f"gs://{GCS_BUCKET}/{prefix}{user}/{folder}/{filename}"
 
-def upload_to_gcs(uid: Optional[str], folder: str, content: bytes, filename: str) -> str:
+def upload_to_gcs(org_id: str, doctor_uid: str, patient_id: str, session_id: str, note_id: str, content: bytes, filename: str) -> str:
     if not USE_GCS:
         return ""
     bucket = gcs_client.bucket(GCS_BUCKET)
-    prefix = f"{GCS_BASE_PREFIX.strip('/')}/" if GCS_BASE_PREFIX else ""
-    user = uid if uid else "_public"
-    blob_path = f"{prefix}{user}/{folder}/{filename}"
+    _, ext = os.path.splitext(filename or ".bin")
+    blob_path = f"{org_id}/{doctor_uid}/{patient_id}/sessions/{session_id}/raw/{note_id}{ext}"
     blob = bucket.blob(blob_path)
     blob.upload_from_string(content)  # bytes
     return f"gs://{GCS_BUCKET}/{blob_path}"
 
-def upload_json_to_gcs(uid: Optional[str], folder: str, data: Dict[str, Any], prefix: str) -> str:
+def upload_json_to_gcs(org_id: str, doctor_uid: str, patient_id: str, session_id: str, note_id: str, data: Dict[str, Any]) -> str:
     if not USE_GCS:
         return ""
-    fname = f"{prefix}_{_ts()}.json"
     bucket = gcs_client.bucket(GCS_BUCKET)
-    prefix0 = f"{GCS_BASE_PREFIX.strip('/')}/" if GCS_BASE_PREFIX else ""
-    user = uid if uid else "_public"
-    blob_path = f"{prefix0}{user}/{folder}/{fname}"
+    blob_path = f"{org_id}/{doctor_uid}/{patient_id}/sessions/{session_id}/derived/transcription/{note_id}.json"
     blob = bucket.blob(blob_path)
     blob.upload_from_string(json.dumps(data, ensure_ascii=False, indent=4), content_type="application/json")
     return f"gs://{GCS_BUCKET}/{blob_path}"
@@ -118,15 +117,18 @@ def download_gcs_bytes(uri: str) -> bytes:
 async def transcribir_audio(
     file: UploadFile = File(None, description="Archivo de audio (mp3, m4a, wav, etc.)"),
     gcs_uri: Optional[str] = Form(default=None, description="URI de GCS gs://bucket/path"),
-    user_id_header: Optional[str] = Header(default=None, alias="X-User-Id"),
-    user_id_form: Optional[str] = Form(default=None),
+    user_id_header: Optional[str] = Header(default=None, alias="X-User-Id"), # Sigue siendo el doctor_uid
+    org_id: str = Form(...),
+    patient_id: str = Form(...),
+    session_id: str = Form(...),
+    note_id: str = Form(...) # El ID único para el archivo/nota
 ):
     """
     Soporta:
       - file (multipart)  O  gcs_uri (form)
     Guarda local y, si USE_GCS=true, también en GCS.
     """
-    uid = user_id_form or user_id_header
+    uid = user_id_header # uid es el doctor_uid
     dirs = ensure_user_dirs(uid)
 
     try:
@@ -140,12 +142,15 @@ async def transcribir_audio(
             if not audio_bytes:
                 raise HTTPException(status_code=400, detail="Archivo vacío o no válido.")
             # Local save
-            local_audio_rel = save_local_bytes(audio_bytes, dirs["audios"], "audio", file.filename)
+            if SAVE_LOCAL_RESULTS:
+                local_audio_rel = save_local_bytes(audio_bytes, dirs["audios"], "audio", file.filename)
             # GCS save (opcional)
             if USE_GCS:
-                name, ext = os.path.splitext(file.filename or "audio.bin")
-                gcs_name = f"audio_{_ts()}{ext or '.bin'}"
-                audio_gcs_uri = upload_to_gcs(uid, DIR_AUDIOS, audio_bytes, gcs_name)
+                audio_gcs_uri = upload_to_gcs(
+                    org_id=org_id, doctor_uid=uid, patient_id=patient_id,
+                    session_id=session_id, note_id=note_id,
+                    content=audio_bytes, filename=file.filename
+                )
             mime = guess_mime(file.filename or "", file.content_type or "audio/mpeg")
 
         elif gcs_uri:
@@ -168,9 +173,14 @@ async def transcribir_audio(
         payload = {"texto": texto}
 
         # Guardar JSON local
-        local_json_rel = save_local_json(payload, dirs["pruebas_audio"], "transcripcion")
+        local_json_rel = None # Inicializa como None
+        if SAVE_LOCAL_RESULTS:
+            local_json_rel = save_local_json(payload, dirs["pruebas_audio"], "transcripcion")
         # Guardar JSON en GCS
-        gcs_json_uri = upload_json_to_gcs(uid, DIR_PRUEBAS_AUD, payload, "transcripcion") if USE_GCS else ""
+        gcs_json_uri = upload_json_to_gcs(
+            org_id=org_id, doctor_uid=uid, patient_id=patient_id,
+            session_id=session_id, note_id=note_id, data=payload
+        ) if USE_GCS else ""
 
         return {
             "mensaje": "Transcripción completada",

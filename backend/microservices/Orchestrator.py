@@ -1,11 +1,45 @@
 import os
 from datetime import datetime
 from typing import Any, Dict, Optional
+from fastapi import FastAPI, File, UploadFile, HTTPException, Header, Form, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+import firebase_admin
+from firebase_admin import credentials, auth
 
-from fastapi import FastAPI, File, UploadFile, HTTPException, Header, Form
 from pydantic import BaseModel
 import httpx
 import json
+import uuid
+
+# ──────────────────────────────────────────────────────────────────────────────
+# INICIALIZACIÓN DE FIREBASE
+try:
+    cred = credentials.Certificate("serviceAccountKey.json")
+    firebase_admin.initialize_app(cred)
+    print("Firebase Admin SDK inicializado correctamente.")
+except Exception as e:
+    print(f"Error inicializando Firebase Admin SDK: {e}")
+
+security = HTTPBearer()
+
+async def get_current_user(cred: HTTPAuthorizationCredentials = Depends(security)):
+    """
+    Verifica el token de Firebase ID enviado en el encabezado de autorización.
+    Si el token es válido, devuelve los datos decodificados del usuario.
+    Si no, levanta una excepción HTTP 401.
+    """
+    #print(f"DEBUG: Credenciales recibidas por el servidor: {cred}")
+    if not cred:
+        raise HTTPException(status_code=401, detail="Falta el token de autorización")
+    try:
+        # Extrae el token del objeto de credenciales
+        token = cred.credentials
+        # Verifica el token usando el SDK de Firebase
+        decoded_token = auth.verify_id_token(token)
+        return decoded_token
+    except Exception as e:
+        # Si la verificación falla por cualquier motivo (expirado, inválido, etc.)
+        raise HTTPException(status_code=401, detail=f"Token inválido: {e}")
 
 # ──────────────────────────────────────────────────────────────────────────────
 # URLs de microservicios (ajusta a Cloud Run cuando migres)
@@ -92,24 +126,34 @@ def build_forward_headers(authorization: Optional[str], uid: Optional[str]) -> D
 async def orquestar_foto(
     file: UploadFile = File(None, description="Imagen o PDF (raster)"),
     gcs_uri: Optional[str] = Form(default=None, description="gs://bucket/ruta/imagen"),
-    authorization: Optional[str] = Header(default=None, alias="Authorization"),
-    user_id_header: Optional[str] = Header(default=None, alias="X-User-Id"),
-    user_id_form: Optional[str] = Form(default=None),
+    current_user: dict = Depends(get_current_user),
+    patient_id: str = Form(...),
+    session_id: str = Form(...),
+    org_id: str = Form(...)
 ):
     """
     Si viene 'file': guarda la foto localmente (pruebas) y llama OCR con 'file'.
     Si viene 'gcs_uri': NO guarda binario local y llama OCR con 'gcs_uri'.
     Luego pasa el 'texto' devuelto por OCR DIRECTO al analizador (JSON).
     """
-    effective_user_id = user_id_form or user_id_header
+    # effective_user_id = user_id_form or user_id_header
+    effective_user_id = current_user["uid"]
+    print(f"Petición recibida por el doctor UID verificado: {effective_user_id}")
     dirs = ensure_user_dirs(effective_user_id)
-    forward_headers = build_forward_headers(authorization, effective_user_id)
+    forward_headers = build_forward_headers(None, effective_user_id)
+
+    note_id = str(uuid.uuid4())
+    downstream_data = {
+        "org_id": org_id,
+        "patient_id": patient_id,
+        "session_id": session_id,
+        "note_id": note_id
+    }
 
     if not file and not gcs_uri:
         raise HTTPException(status_code=400, detail="Envía 'file' o 'gcs_uri'.")
 
     try:
-        foto_rel_path = None
         async with httpx.AsyncClient(timeout=httpx.Timeout(READ_TIMEOUT, connect=CONNECT_TIMEOUT)) as client:
             # OCR
             if file is not None:
@@ -117,12 +161,12 @@ async def orquestar_foto(
                 if not file_bytes:
                     raise HTTPException(status_code=400, detail="Archivo vacío o no válido.")
                 # guardar local (pruebas)
-                foto_rel_path = save_uploaded(file, file_bytes, dirs["fotos"], prefix="foto")
                 files = {"file": (file.filename or "upload.bin", file_bytes, file.content_type or "application/octet-stream")}
-                ocr_resp = await client.post(OCR_URL, files=files, headers=forward_headers)
+                ocr_resp = await client.post(OCR_URL, files=files, data=downstream_data,headers=forward_headers)
             else:
                 # gcs_uri
-                ocr_resp = await client.post(OCR_URL, data={"gcs_uri": gcs_uri}, headers=forward_headers)
+                downstream_data["gcs_uri"] = gcs_uri
+                ocr_resp = await client.post(OCR_URL, data=downstream_data, headers=forward_headers)
 
             if ocr_resp.status_code >= 400:
                 raise HTTPException(status_code=ocr_resp.status_code, detail=f"OCR error: {ocr_resp.text}")
@@ -130,22 +174,24 @@ async def orquestar_foto(
 
             # Análisis (usar texto del OCR)
             texto_detectado = (ocr_json.get("resultado", {}).get("texto") or "").strip()
-            
-            analysis_resp = await client.post(ANALYSIS_URL, json={"texto": texto_detectado}, headers=forward_headers)
+            analysis_payload = {
+                "texto": texto_detectado, # o 'texto' para la función de audio
+                "org_id": org_id,
+                "patient_id": patient_id,
+                "session_id": session_id,
+                "note_id": note_id
+            }
+            analysis_resp = await client.post(ANALYSIS_URL, json=analysis_payload, headers=forward_headers)
             if analysis_resp.status_code >= 400:
                 raise HTTPException(status_code=analysis_resp.status_code, detail=f"Análisis error: {analysis_resp.text}")
             analysis_json = analysis_resp.json()
 
-        # Copias locales de JSON para pruebas
-        ocr_copy_path = save_json_copy({**ocr_json, "fuente_gcs_uri": gcs_uri} if gcs_uri else ocr_json, dirs["ocr"], "ocr")
-        analysis_copy_path = save_json_copy(analysis_json, dirs["analysis"], "emociones")
 
         return {
             "mensaje": "Pipeline completado (foto)",
             "user_id": effective_user_id,
-            "foto_guardada": foto_rel_path,
-            "ocr": {**ocr_json, "archivo_guardado_copy": ocr_copy_path},
-            "analisis": {**analysis_json, "archivo_guardado_copy": analysis_copy_path},
+            "ocr": ocr_json,
+            "analisis": analysis_json,
         }
 
     except HTTPException:
@@ -159,9 +205,10 @@ async def orquestar_foto(
 async def orquestar_audio(
     file: UploadFile = File(None, description="Audio (mp3, m4a, wav, etc.)"),
     gcs_uri: Optional[str] = Form(default=None, description="gs://bucket/ruta/audio"),
-    authorization: Optional[str] = Header(default=None, alias="Authorization"),
-    user_id_header: Optional[str] = Header(default=None, alias="X-User-Id"),
-    user_id_form: Optional[str] = Form(default=None),
+    current_user: dict = Depends(get_current_user),
+    patient_id: str = Form(...),
+    session_id: str = Form(...),
+    org_id: str = Form(...)
 ):
     """
     Si viene 'file': guarda el audio localmente (pruebas) y llama al transcriber con 'file'.
@@ -169,27 +216,37 @@ async def orquestar_audio(
     Si viene 'gcs_uri': llama al transcriber con 'gcs_uri' (no guardamos binario local).
     Luego pasa el 'texto' de la transcripción DIRECTO al analizador (JSON).
     """
-    effective_user_id = user_id_form or user_id_header
+    effective_user_id = current_user["uid"]
+    print(f"Petición recibida por el doctor UID verificado: {effective_user_id}")
     dirs = ensure_user_dirs(effective_user_id)
-    forward_headers = build_forward_headers(authorization, effective_user_id)
+    forward_headers = build_forward_headers(None, effective_user_id)
+
+    # 1. GENERAR UN ID ÚNICO PARA ESTA NOTA DE AUDIO
+    note_id = str(uuid.uuid4())
+
+    # 2. PREPARAR EL PAYLOAD DE DATOS PARA LOS SERVICIOS
+    downstream_data = {
+        "org_id": org_id,
+        "patient_id": patient_id,
+        "session_id": session_id,
+        "note_id": note_id
+    }
 
     if not file and not gcs_uri:
         raise HTTPException(status_code=400, detail="Envía 'file' o 'gcs_uri'.")
 
     try:
-        audio_rel_path = None
         async with httpx.AsyncClient(timeout=httpx.Timeout(READ_TIMEOUT, connect=CONNECT_TIMEOUT)) as client:
             # Transcripción
             if file is not None:
                 file_bytes = await file.read()
                 if not file_bytes:
                     raise HTTPException(status_code=400, detail="Archivo vacío o no válido.")
-                # guardar local (pruebas)
-                audio_rel_path = save_uploaded(file, file_bytes, dirs["audios"], prefix="audio")
                 files = {"file": (file.filename or "audio.bin", file_bytes, file.content_type or "audio/mpeg")}
-                trans_resp = await client.post(AUDIO_URL, files=files, headers=forward_headers)
+                trans_resp = await client.post(AUDIO_URL, files=files, data=downstream_data, headers=forward_headers)
             else:
-                trans_resp = await client.post(AUDIO_URL, data={"gcs_uri": gcs_uri}, headers=forward_headers)
+                downstream_data["gcs_uri"] = gcs_uri
+                trans_resp = await client.post(AUDIO_URL, data=downstream_data, headers=forward_headers)
 
             if trans_resp.status_code >= 400:
                 raise HTTPException(status_code=trans_resp.status_code, detail=f"Audio error: {trans_resp.text}")
@@ -197,22 +254,23 @@ async def orquestar_audio(
 
             # Análisis (usar texto transcrito)
             texto = (trans_json.get("resultado", {}).get("texto") or "").strip()
-            analysis_resp = await client.post(ANALYSIS_URL, json={"texto": texto}, headers=forward_headers)
+            analysis_payload = {
+                "texto": texto, # o 'texto' para la función de audio
+                "org_id": org_id,
+                "patient_id": patient_id,
+                "session_id": session_id,
+                "note_id": note_id
+            }
+            analysis_resp = await client.post(ANALYSIS_URL, json=analysis_payload, headers=forward_headers)
             if analysis_resp.status_code >= 400:
                 raise HTTPException(status_code=analysis_resp.status_code, detail=f"Análisis error: {analysis_resp.text}")
             analysis_json = analysis_resp.json()
 
-        # Copias locales de JSON para pruebas
-        trans_copy_path = save_json_copy({**trans_json, "fuente_gcs_uri": gcs_uri} if gcs_uri else trans_json,
-                                         dirs["pruebas_audio"], "transcripcion")
-        analysis_copy_path = save_json_copy(analysis_json, dirs["analysis"], "emociones")
-
         return {
             "mensaje": "Pipeline completado (audio)",
             "user_id": effective_user_id,
-            "audio_guardado": audio_rel_path,
-            "transcripcion": {**trans_json, "archivo_guardado_copy": trans_copy_path},
-            "analisis": {**analysis_json, "archivo_guardado_copy": analysis_copy_path},
+            "transcripcion": trans_json,
+            "analisis": analysis_json,
         }
 
     except HTTPException:

@@ -24,6 +24,8 @@ USE_GCS         = os.getenv("OCR_USE_GCS", "true").lower() == "true"
 GCS_BUCKET      = os.getenv("OCR_GCS_BUCKET", "ceroooooo")
 GCS_BASE_PREFIX = os.getenv("OCR_GCS_BASE_PREFIX", "")
 
+SAVE_LOCAL_RESULTS = os.getenv("OCR_SAVE_LOCAL", "false").lower() == "true"
+
 # Clientes (simétrico al de audio)
 gcs_client = storage.Client() if USE_GCS else None
 VISION_CLIENT = vision.ImageAnnotatorClient()
@@ -80,31 +82,21 @@ def guess_mime(filename: str, fallback: str) -> str:
     if low.endswith(".heic"): return "image/heic"
     return fallback
 
-def gcs_uri_for(uid: Optional[str], folder: str, filename: str) -> str:
-    prefix = f"{GCS_BASE_PREFIX.strip('/')}/" if GCS_BASE_PREFIX else ""
-    user = uid if uid else "_public"
-    return f"gs://{GCS_BUCKET}/{prefix}{user}/{folder}/{filename}"
-
-def upload_to_gcs(uid: Optional[str], folder: str, content: bytes, filename: str) -> str:
+def upload_to_gcs(org_id: str, doctor_uid: str, patient_id: str, session_id: str, note_id: str, content: bytes, filename: str) -> str:
     if not USE_GCS:
         return ""
     bucket = gcs_client.bucket(GCS_BUCKET)
-    prefix = f"{GCS_BASE_PREFIX.strip('/')}/" if GCS_BASE_PREFIX else ""
-    user = uid if uid else "_public"
-    blob_path = f"{prefix}{user}/{folder}/{filename}"
+    _, ext = os.path.splitext(filename or ".bin")
+    blob_path = f"{org_id}/{doctor_uid}/{patient_id}/sessions/{session_id}/raw/{note_id}{ext}"
     blob = bucket.blob(blob_path)
-    # Para imágenes, mejor con content_type correcto
     blob.upload_from_string(content, content_type=guess_mime(filename, "application/octet-stream"))
     return f"gs://{GCS_BUCKET}/{blob_path}"
 
-def upload_json_to_gcs(uid: Optional[str], folder: str, data: Dict[str, Any], prefix: str) -> str:
+def upload_json_to_gcs(org_id: str, doctor_uid: str, patient_id: str, session_id: str, note_id: str, data: Dict[str, Any]) -> str:
     if not USE_GCS:
         return ""
-    fname = f"{prefix}_{_ts()}.json"
     bucket = gcs_client.bucket(GCS_BUCKET)
-    prefix0 = f"{GCS_BASE_PREFIX.strip('/')}/" if GCS_BASE_PREFIX else ""
-    user = uid if uid else "_public"
-    blob_path = f"{prefix0}{user}/{folder}/{fname}"
+    blob_path = f"{org_id}/{doctor_uid}/{patient_id}/sessions/{session_id}/derived/ocr/{note_id}.json"
     blob = bucket.blob(blob_path)
     blob.upload_from_string(json.dumps(data, ensure_ascii=False, indent=4), content_type="application/json")
     return f"gs://{GCS_BUCKET}/{blob_path}"
@@ -127,8 +119,11 @@ def download_gcs_bytes(uri: str) -> bytes:
 async def ocr_imagen(
     file: UploadFile = File(None, description="Imagen (jpg, png, webp, tiff, etc.)"),
     gcs_uri: Optional[str] = Form(default=None, description="URI de GCS gs://bucket/path"),
-    user_id_header: Optional[str] = Header(default=None, alias="X-User-Id"),
-    user_id_form: Optional[str] = Form(default=None),
+    user_id_header: Optional[str] = Header(default=None, alias="X-User-Id"), # Sigue siendo el doctor_uid
+    org_id: str = Form(...),
+    patient_id: str = Form(...),
+    session_id: str = Form(...),
+    note_id: str = Form(...) # El ID único para el archivo/nota
 ):
     """
     Soporta:
@@ -136,7 +131,7 @@ async def ocr_imagen(
     Guarda la imagen local y, si USE_GCS=true, también en GCS.
     Ejecuta OCR con Vision y devuelve texto + JSON local/GCS (mismo formato que audio).
     """
-    uid = user_id_form or user_id_header
+    uid = user_id_header #uid es el doctor_uid
     dirs = ensure_user_dirs(uid)
 
     try:
@@ -150,12 +145,15 @@ async def ocr_imagen(
             if not image_bytes:
                 raise HTTPException(status_code=400, detail="Archivo vacío o no válido.")
             # Guardar local
-            local_img_rel = save_local_bytes(image_bytes, dirs["fotos"], "imagen", file.filename)
+            if SAVE_LOCAL_RESULTS:
+                local_img_rel = save_local_bytes(image_bytes, dirs["fotos"], "imagen", file.filename)
             # Subir a GCS (opcional)
             if USE_GCS:
-                name, ext = os.path.splitext(file.filename or "imagen.bin")
-                gcs_name = f"imagen_{_ts()}{ext or '.bin'}"
-                image_gcs_uri = upload_to_gcs(uid, DIR_FOTOS, image_bytes, gcs_name)
+                image_gcs_uri = upload_to_gcs(
+                org_id=org_id, doctor_uid=uid, patient_id=patient_id,
+                session_id=session_id, note_id=note_id,
+                content=image_bytes, filename=file.filename
+            )
             mime = guess_mime(file.filename or "", file.content_type or "image/jpeg")
 
             # 2) Ejecutar OCR (con bytes, simétrico a audio)
@@ -188,9 +186,14 @@ async def ocr_imagen(
         payload = {"texto": texto_detectado or ""}
 
         # Guardar JSON local (mismo patrón que audio)
-        local_json_rel = save_local_json(payload, dirs["pruebas_ocr"], "ocr")
+        local_json_rel = None # Inicializa como None
+        if SAVE_LOCAL_RESULTS:
+            local_json_rel = save_local_json(payload, dirs["pruebas_ocr"], "ocr")
         # Guardar JSON en GCS (mismo patrón que audio)
-        gcs_json_uri = upload_json_to_gcs(uid, DIR_PRUEBAS_IMG, payload, "ocr") if USE_GCS else ""
+        gcs_json_uri = upload_json_to_gcs(
+        org_id=org_id, doctor_uid=uid, patient_id=patient_id,
+        session_id=session_id, note_id=note_id, data=payload
+        ) if USE_GCS else ""
 
         return {
             "mensaje": "OCR completado",

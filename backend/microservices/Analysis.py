@@ -1,4 +1,4 @@
-""" Ebdpoint para:
+""" Endpoint para:
 Recibir un texto en un POST.
 Analizar 8 emociones (ej: alegría, tristeza, enojo, miedo, sorpresa, disgusto, estrés, calma).
 Extraer entidades relacionadas con cada emoción y asignar porcentajes de certeza.
@@ -34,7 +34,7 @@ DIR_ANALYSIS    = "pruebas_analisis"
 
 USE_GCS         = os.getenv("AN_USE_GCS", "true").lower() == "true"
 GCS_BUCKET      = os.getenv("AN_GCS_BUCKET", "ceroooooo")
-GCS_BASE_PREFIX = os.getenv("AN_GCS_BASE_PREFIX", "p1")
+SAVE_LOCAL_RESULTS = os.getenv("AN_SAVE_LOCAL", "false").lower() == "true"
 
 vertexai.init(project=PROJECT_ID, location=LOCATION)
 model = GenerativeModel(MODEL_ID)
@@ -49,6 +49,10 @@ TARGET_EMOTIONS = [
 class TextoEntrada(BaseModel):
     texto: Optional[str] = None
     gcs_uri: Optional[str] = None 
+    org_id: str
+    patient_id: str
+    session_id: str
+    note_id: str
 
 def _ts() -> str:
     return datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -66,14 +70,11 @@ def save_local_json(uid: Optional[str], data: Dict[str, Any], prefix: str) -> st
         json.dump(data, f, ensure_ascii=False, indent=4)
     return os.path.relpath(abspath, start=".")
 
-def upload_json_to_gcs(uid: Optional[str], data: Dict[str, Any], prefix: str) -> str:
+def upload_json_to_gcs(org_id: str, doctor_uid: str, patient_id: str, session_id: str, note_id: str, data: Dict[str, Any]) -> str:
     if not USE_GCS:
         return ""
     bucket = gcs_client.bucket(GCS_BUCKET)
-    base = f"{GCS_BASE_PREFIX.strip('/')}/" if GCS_BASE_PREFIX else ""
-    user = uid if uid else "_public"
-    fname = f"{prefix}_{_ts()}.json"
-    blob_path = f"{base}{user}/{DIR_ANALYSIS}/{fname}"
+    blob_path = f"{org_id}/{doctor_uid}/{patient_id}/sessions/{session_id}/derived/analisis/{note_id}.json"
     blob = bucket.blob(blob_path)
     blob.upload_from_string(json.dumps(data, ensure_ascii=False, indent=4), content_type="application/json")
     return f"gs://{GCS_BUCKET}/{blob_path}"
@@ -146,12 +147,22 @@ def analizar_emociones(
         }
 
         # Guardar local y GCS
-        local_path = save_local_json(user_id, result, "emociones")
-        gcs_path = upload_json_to_gcs(user_id, result, "emociones") if USE_GCS else ""
+        local_path = None # Inicializa como None
+        if SAVE_LOCAL_RESULTS:
+            local_path = save_local_json(user_id, result, "emociones")
+
+        gcs_path = upload_json_to_gcs(
+            org_id=entrada.org_id,
+            doctor_uid=user_id,
+            patient_id=entrada.patient_id,
+            session_id=entrada.session_id,
+            note_id=entrada.note_id,
+            data=result
+        ) if USE_GCS else ""
 
         return {
             **result,
-            "archivo_guardado_local": local_path,
+            "archivo_guardado_local:": local_path,
             "archivo_guardado_gcs": gcs_path or None
         }
 
