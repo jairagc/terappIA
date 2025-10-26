@@ -90,8 +90,7 @@ Copia el token largo que te devuelve el script.
 
 1.  Ve a `http://localhost:8000/docs`.
 2.  Haz clic en el botón **Authorize** en la esquina superior derecha.
-3.  En el campo "Value", pega la palabra `Bearer`, un espacio, y luego tu token. Debe quedar así:
-    **`Bearer eyJhbGciOiJSUzI1NiIsImt...`**
+3.  En el campo "Value" tu token. 
 4.  Haz clic en "Authorize". Ahora todas tus peticiones desde esa página estarán autenticadas.
 
 **Opción B: Con `curl`**
