@@ -91,7 +91,7 @@ def build_forward_headers(authorization: Optional[str], uid: Optional[str]) -> D
 @app.post("/orquestar_foto", response_model=OrquestacionFotoRespuesta)
 async def orquestar_foto(
     file: UploadFile = File(None, description="Imagen o PDF (raster)"),
-    gcs_uri: Optional[str] = Form(default=None, description="gs://bucket/ruta/imagen_o_pdf"),
+    gcs_uri: Optional[str] = Form(default=None, description="gs://bucket/ruta/imagen"),
     authorization: Optional[str] = Header(default=None, alias="Authorization"),
     user_id_header: Optional[str] = Header(default=None, alias="X-User-Id"),
     user_id_form: Optional[str] = Form(default=None),
@@ -129,14 +129,14 @@ async def orquestar_foto(
             ocr_json = ocr_resp.json()
 
             # Análisis (usar texto del OCR)
-            texto_detectado = (ocr_json.get("texto") or "").strip()
+            texto_detectado = (ocr_json.get("resultado", {}).get("texto") or "").strip()
+            
             analysis_resp = await client.post(ANALYSIS_URL, json={"texto": texto_detectado}, headers=forward_headers)
             if analysis_resp.status_code >= 400:
                 raise HTTPException(status_code=analysis_resp.status_code, detail=f"Análisis error: {analysis_resp.text}")
             analysis_json = analysis_resp.json()
 
         # Copias locales de JSON para pruebas
-        # (si vino gcs_uri también guardamos copia del resultado con fuente)
         ocr_copy_path = save_json_copy({**ocr_json, "fuente_gcs_uri": gcs_uri} if gcs_uri else ocr_json, dirs["ocr"], "ocr")
         analysis_copy_path = save_json_copy(analysis_json, dirs["analysis"], "emociones")
 

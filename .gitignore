@@ -3,3 +3,5 @@ backend/microservices/pruebas_ocr/
 backend/microservices/__pycache__/
 backend/microservices/data_local/_public/fotos/
 backend/microservices/data_local/_public/pruebas_ocr/
+serviceAccountKey.json
+backend/microservices/data_local/

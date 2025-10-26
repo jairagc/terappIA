@@ -123,7 +123,7 @@ def download_gcs_bytes(uri: str) -> bytes:
 # ──────────────────────────────────────────────────────────────────────────────
 # Endpoint (idéntica firma y lógica de control que el de audio)
 
-@app.post("/ocr_imagen", response_model=OCRRespuesta)
+@app.post("/ocr", response_model=OCRRespuesta)
 async def ocr_imagen(
     file: UploadFile = File(None, description="Imagen (jpg, png, webp, tiff, etc.)"),
     gcs_uri: Optional[str] = Form(default=None, description="URI de GCS gs://bucket/path"),
