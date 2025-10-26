@@ -24,3 +24,114 @@ curl -X POST "http://localhost:8080/orquestar_foto" ^  -H "Authorization: Bearer
 
 AUDIO
 >curl -X POST "http://localhost:8080/orquestar_audio" ^  -H "Authorization: Bearer <ID_TOKEN>" ^  -H "X-User-Id: JenniferMorales" ^  -F "gcs_uri=gs://ceroooooo/AudioPrueba.m4a"
+
+## Modificaciones Recientes y Arquitectura de Datos
+
+El sistema ha sido refactorizado para pasar de un prototipo de pruebas a una arquitectura segura y estructurada, lista para producción.
+
+### 1. Autenticación Centralizada 💂
+Toda la seguridad ahora se centraliza en el **Orquestador**, que actúa como el único punto de entrada (Gateway).
+
+* **Se eliminó el uso de `X-User-Id`** para la autenticación, ya que era inseguro.
+* Se implementó la verificación de **Tokens de Identidad de Firebase (JWT)**. Cada petición a un endpoint protegido debe incluir el encabezado `Authorization: Bearer <token>`.
+* El Orquestador verifica el token, extrae el `uid` del doctor (doctor_uid) de forma segura y lo pasa a los servicios internos a través del encabezado `X-User-Id`, que ahora solo se usa para comunicación interna de confianza.
+
+### 2. Estructura de Datos en GCS 🗃️
+El almacenamiento en Google Cloud Storage ha sido reestructurado para seguir el esquema de datos definido. Los archivos ya no se guardan en carpetas genéricas, sino en una ruta jerárquica y predecible.
+
+### 3. Limpieza y Refactorización 🧹
+Para preparar el sistema para producción y eliminar el desorden:
+
+* **Se eliminaron las copias locales redundantes** en el Orquestador (`save_uploaded`, `save_json_copy`).
+* El guardado local de archivos en los servicios de OCR, Audio y Análisis ahora es **opcional** y está controlado por una **bandera de depuración** (variable de entorno `SAVE_LOCAL_RESULTS`). Por defecto, está desactivado.
+
+---
+## Estructura Final del Bucket en GCS
+
+Todos los archivos generados por el sistema se organizan en GCS siguiendo esta estructura, asegurando que cada dato esté asociado a una organización, doctor, paciente y sesión específicos.
+
+```bash
+gs://{nombre-del-bucket}/
+└── {org_id}/
+    └── {doctor_uid}/
+        └── {patient_id}/
+            └── sessions/
+                └── {session_id}/
+                    ├── raw/
+                    │   ├── {note_id}.jpg      # Imagen original subida
+                    │   └── {note_id}.m4a      # Audio original subido
+                    │
+                    └── derived/
+                        ├── ocr/
+                        │   └── {note_id}.json # Resultado del OCR
+                        ├── transcription/
+                        │   └── {note_id}.json # Resultado de la transcripción
+                        └── analisis/
+                            └── {note_id}.json # Resultado del análisis de emociones
+
+## Cómo Realizar Pruebas Autenticadas 🚀
+
+Para probar los endpoints protegidos, necesitas obtener un token de un usuario de prueba.
+
+### Paso 1: Crear un Usuario de Prueba en Firebase
+Ve a tu **Consola de Firebase → Authentication → Users** y haz clic en **"Add user"**. Crea un usuario con un correo y contraseña.
+
+### Paso 2: Obtener tu Web API Key
+En la **Consola de Firebase**, ve a **Project Settings ⚙️ → General**. En la sección "Your apps", busca y copia la **Web API Key**.
+
+### Paso 3: Crear y Ejecutar el Script `get_token.py`
+Crea un archivo llamado `get_token.py` y pega el siguiente código. Reemplaza los placeholders con tus datos.
+
+```python
+import requests
+import json
+
+# Pega tu Web API Key de Firebase aquí
+API_KEY = "TU_WEB_API_KEY_AQUI"
+
+# Datos del usuario de prueba que creaste
+email = "email_de_prueba@ejemplo.com"
+password = "password_del_usuario"
+
+url = f"[https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=](https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=){API_KEY}"
+data = {
+    "email": email,
+    "password": password,
+    "returnSecureToken": True
+}
+
+try:
+    response = requests.post(url, data=data)
+    response.raise_for_status() # Lanza un error si la petición falla
+    token_data = response.json()
+    print("✅ ¡Token obtenido con éxito! Cópialo y úsalo para las pruebas.\n")
+    print(token_data['idToken'])
+except requests.exceptions.HTTPError as err:
+    print(f"❌ Error al obtener el token: {err.response.status_code}")
+    print(err.response.json())
+
+    Instala `requests` si no lo tienes (`pip install requests`) y ejecuta el script: `python get_token.py`.
+
+### Paso 4: Usar el Token para Probar
+
+Copia el token largo que te devuelve el script.
+
+**Opción A: Con FastAPI Docs (Swagger UI)**
+
+1.  Ve a `http://localhost:8000/docs`.
+2.  Haz clic en el botón **Authorize** en la esquina superior derecha.
+3.  En el campo "Value", pega la palabra `Bearer`, un espacio, y luego tu token. Debe quedar así:
+    **`Bearer eyJhbGciOiJSUzI1NiIsImt...`**
+4.  Haz clic en "Authorize". Ahora todas tus peticiones desde esa página estarán autenticadas.
+
+**Opción B: Con `curl`**
+
+Usa el token en el encabezado `Authorization` para hacer peticiones desde la terminal.
+
+```bash
+curl -X POST "http://localhost:8000/orquestar_foto" \
+     -H "Authorization: Bearer TU_TOKEN_AQUI" \
+     -F "file=@/ruta/a/tu/imagen.jpg" \
+     -F "org_id=clinica_demo" \
+     -F "patient_id=paciente_001" \
+     -F "session_id=sesion_abc"
