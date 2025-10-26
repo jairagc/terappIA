@@ -78,36 +78,7 @@ Ve a tu **Consola de Firebase → Authentication → Users** y haz clic en **"Ad
 ### Paso 2: Obtener tu Web API Key
 En la **Consola de Firebase**, ve a **Project Settings ⚙️ → General**. En la sección "Your apps", busca y copia la **Web API Key**.
 
-### Paso 3: Crear y Ejecutar el Script `get_token.py`
-Crea un archivo llamado `get_token.py` y pega el siguiente código. Reemplaza los placeholders con tus datos.
-
-```python
-import requests
-import json
-
-# Pega tu Web API Key de Firebase aquí
-API_KEY = "TU_WEB_API_KEY_AQUI"
-
-# Datos del usuario de prueba que creaste
-email = "email_de_prueba@ejemplo.com"
-password = "password_del_usuario"
-
-url = f"[https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=](https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=){API_KEY}"
-data = {
-    "email": email,
-    "password": password,
-    "returnSecureToken": True
-}
-
-try:
-    response = requests.post(url, data=data)
-    response.raise_for_status() # Lanza un error si la petición falla
-    token_data = response.json()
-    print("✅ ¡Token obtenido con éxito! Cópialo y úsalo para las pruebas.\n")
-    print(token_data['idToken'])
-except requests.exceptions.HTTPError as err:
-    print(f"❌ Error al obtener el token: {err.response.status_code}")
-    print(err.response.json())
+### Paso 3: Ejecutar el Script `get_token.py`
 
     Instala `requests` si no lo tienes (`pip install requests`) y ejecuta el script: `python get_token.py`.
 
