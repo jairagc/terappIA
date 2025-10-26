@@ -50,7 +50,6 @@ Para preparar el sistema para producción y eliminar el desorden:
 
 Todos los archivos generados por el sistema se organizan en GCS siguiendo esta estructura, asegurando que cada dato esté asociado a una organización, doctor, paciente y sesión específicos.
 
-```bash
 gs://{nombre-del-bucket}/
 └── {org_id}/
     └── {doctor_uid}/
