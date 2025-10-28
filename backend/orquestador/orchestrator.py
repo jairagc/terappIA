@@ -10,6 +10,15 @@ import httpx
 import firebase_admin
 from firebase_admin import credentials, auth
 
+<<<<<<< HEAD
+=======
+from pydantic import BaseModel
+import httpx
+import json
+import uuid
+from google.cloud import firestore
+
+>>>>>>> 3dbc65a (firestore)
 # ──────────────────────────────────────────────────────────────────────────────
 # Firebase Admin init (seguro para Cloud Run: sin JSON si no existe)
 def _init_firebase_admin_once():
@@ -25,6 +34,9 @@ def _init_firebase_admin_once():
             firebase_admin.initialize_app()  # ADC (Workload Identity/SA de Cloud Run)
 
 _init_firebase_admin_once()
+
+# INICIALIZACIÓN DE FIRESTORE
+db = firestore.Client()
 
 security = HTTPBearer()
 
@@ -63,6 +75,58 @@ class OrquestacionAudioRespuesta(BaseModel):
     transcripcion: Dict[str, Any]
     analisis: Dict[str, Any]
 
+<<<<<<< HEAD
+=======
+# ──────────────────────────────────────────────────────────────────────────────
+
+async def _save_note_to_firestore(
+    db: firestore.Client,
+    org_id: str,
+    doctor_uid: str,
+    patient_id: str,
+    session_id: str,
+    note_id: str,
+    note_type: str,
+    source_type: str,
+    source_gcs_uri: str,
+    text_content: str,
+    analysis_result: dict
+):
+    """
+    Construye y guarda el documento 'note' en Firestore siguiendo el diseño formal.
+    """
+    try:
+        print(f"INFO: Guardando metadatos de la nota {note_id} en Firestore...")
+        # 1. Construye la ruta jerárquica del documento
+        note_ref = db.collection("orgs").document(org_id) \
+                     .collection("doctors").document(doctor_uid) \
+                     .collection("patients").document(patient_id) \
+                     .collection("sessions").document(session_id) \
+                     .collection("notes").document(note_id)
+
+        # 2. Prepara el diccionario de datos a guardar (el "documento")
+        note_data = {
+            "note_id": note_id,
+            "type": note_type, # "image" o "audio"
+            "source": source_type, # "upload" o "gcs_uri"
+            "gcs_uri_source": source_gcs_uri, # Enlace al archivo raw original
+            "ocr_text": text_content,
+            "emotions": analysis_result.get("resultado", {}),
+            "status_pipeline": "done",
+            "created_at": firestore.SERVER_TIMESTAMP,
+            "processed_at": firestore.SERVER_TIMESTAMP
+        }
+
+        # 3. Escribe el documento en Firestore
+        note_ref.set(note_data)
+        print(f"ÉXITO: Metadatos de la nota {note_id} guardados correctamente.")
+
+    except Exception as e:
+        print(f"ERROR: Falló la escritura en Firestore para la nota {note_id}. Causa: {e}")
+        # En un sistema de producción, aquí podrías añadir lógica para reintentos o alertas.
+        raise HTTPException(status_code=500, detail=f"Error al guardar en la base de datos: {e}")
+
+>>>>>>> 3dbc65a (firestore)
 def _timestamp() -> str:
     return datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -140,10 +204,35 @@ async def orquestar_foto(
                 "session_id": session_id,
                 "note_id": note_id,
             }
+<<<<<<< HEAD
             an_resp = await client.post(ANALYSIS_URL, json=analysis_payload, headers=headers)
             if an_resp.status_code >= 400:
                 raise HTTPException(status_code=an_resp.status_code, detail=f"Análisis error: {an_resp.text}")
             analysis_json = an_resp.json()
+=======
+            analysis_resp = await client.post(ANALYSIS_URL, json=analysis_payload, headers=forward_headers)
+            if analysis_resp.status_code >= 400:
+                raise HTTPException(status_code=analysis_resp.status_code, detail=f"Análisis error: {analysis_resp.text}")
+            analysis_json = analysis_resp.json()
+
+        # 1. Determina la URI del archivo original
+        source_gcs_uri = ocr_json.get("imagen_gcs") if file else gcs_uri
+
+        # 2. Llama a nuestra función centralizada para guardar los datos
+        await _save_note_to_firestore(
+            db=db,
+            org_id=org_id,
+            doctor_uid=effective_user_id,
+            patient_id=patient_id,
+            session_id=session_id,
+            note_id=note_id,
+            note_type="image",
+            source_type="upload" if file else "gcs_uri",
+            source_gcs_uri=source_gcs_uri,
+            text_content=texto_detectado,
+            analysis_result=analysis_json
+        )
+>>>>>>> 3dbc65a (firestore)
 
         return {
             "mensaje": "Pipeline completado (foto)",
@@ -222,6 +311,24 @@ async def orquestar_audio(
             if an_resp.status_code >= 400:
                 raise HTTPException(status_code=an_resp.status_code, detail=f"Análisis error: {an_resp.text}")
             analysis_json = an_resp.json()
+
+        # 1. Determina la URI del archivo original
+        source_gcs_uri = trans_json.get("audio_gcs") if file else gcs_uri
+
+        # 2. Llama a nuestra función centralizada para guardar los datos
+        await _save_note_to_firestore(
+            db=db,
+            org_id=org_id,
+            doctor_uid=effective_user_id,
+            patient_id=patient_id,
+            session_id=session_id,
+            note_id=note_id,
+            note_type="audio",
+            source_type="upload" if file else "gcs_uri",
+            source_gcs_uri=source_gcs_uri,
+            text_content=texto,
+            analysis_result=analysis_json
+        )
 
         return {
             "mensaje": "Pipeline completado (audio)",
