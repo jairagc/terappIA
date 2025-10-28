@@ -1,7 +1,21 @@
 // src/pages/MainDashboard.jsx
 import React from "react";
+import { useNavigate } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
 
 export default function MainDashboard() {
+  const navigate = useNavigate();
+  const { logout } = useAuth();
+
+  const handleLogout = async () => {
+    try {
+      await logout();             // Firebase signOut via AuthContext
+      navigate("/login", { replace: true });
+    } catch (e) {
+      console.error("Logout failed:", e);
+    }
+  };
+
   return (
     <div className="flex h-screen flex-col bg-background-light dark:bg-background-dark font-display text-text-primary">
       {/* Header */}
@@ -12,12 +26,15 @@ export default function MainDashboard() {
           </span>
           <h1 className="text-xl font-bold">TerappIA</h1>
         </div>
-        <a
-          href="#"
-          className="text-sm font-medium hover:underline"
+        
+        {/* Exit / Logout */}
+        <button
+          onClick={handleLogout}
+          className="text-sm font-medium hover:underline focus:outline-none"
+          aria-label="Cerrar sesión"
         >
           Cerrar sesión
-        </a>
+        </button>
       </header>
 
       {/* Main layout */}
