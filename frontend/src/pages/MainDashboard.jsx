@@ -78,7 +78,7 @@ export default function MainDashboard() {
               <p className="mb-6 text-text-secondary">
                 Genera y modifica notas de evolución.
               </p>
-              <button className="flex min-w-[84px] cursor-pointer items-center justify-center rounded-lg bg-dark-navy px-5 py-3 text-base font-bold text-white shadow-md transition-colors duration-300 hover:bg-opacity-90">
+              <button onClick={() => navigate("/generate-progress-note")} className="flex min-w-[84px] cursor-pointer items-center justify-center rounded-lg bg-dark-navy px-5 py-3 text-base font-bold text-white shadow-md transition-colors duration-300 hover:bg-opacity-90">
                 Generar notas
               </button>
             </div>
@@ -96,7 +96,7 @@ export default function MainDashboard() {
               <p className="mb-6 text-text-secondary">
                 Revisa y analiza notas previamente registradas.
               </p>
-              <button className="flex min-w-[84px] cursor-pointer items-center justify-center rounded-lg bg-dark-navy px-5 py-3 text-base font-bold text-white shadow-md transition-colors duration-300 hover:bg-opacity-90">
+              <button onClick={() => navigate("/patient-progress-note-overview")} className="flex min-w-[84px] cursor-pointer items-center justify-center rounded-lg bg-dark-navy px-5 py-3 text-base font-bold text-white shadow-md transition-colors duration-300 hover:bg-opacity-90">
                 Consultar notas
               </button>
             </div>

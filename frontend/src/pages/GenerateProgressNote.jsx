@@ -1,7 +1,11 @@
 // src/pages/GenerateProgressNote.jsx
 import React from "react";
+import { useNavigate } from "react-router-dom";
 
 export default function GenerateProgressNote() {
+
+  const navigate = useNavigate();
+
   return (
     <div className="relative flex h-auto min-h-screen w-full flex-col overflow-x-hidden bg-background-light dark:bg-background-dark font-display">
       <div className="layout-container flex h-full grow flex-col">
@@ -32,7 +36,7 @@ export default function GenerateProgressNote() {
                 >
                   Notas de evolución
                 </a>
-                <button className="flex min-w-[84px] max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-full h-10 px-4 bg-primary text-white text-sm font-bold leading-normal tracking-wide">
+                <button onClick={() => navigate("/dashboard")} className="flex min-w-[84px] max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-full h-10 px-4 bg-primary text-white text-sm font-bold leading-normal tracking-wide">
                   <span className="truncate">Regresar</span>
                 </button>
               </div>
@@ -63,7 +67,7 @@ export default function GenerateProgressNote() {
                     <option>Sofía Martínez</option>
                   </select>
                 </div>
-                <button className="flex min-w-[84px] cursor-pointer items-center justify-center overflow-hidden rounded-full h-12 px-6 bg-primary text-white text-base font-bold leading-normal tracking-wide">
+                <button onClick={() => navigate("/register-new-patient")} className="flex min-w-[84px] cursor-pointer items-center justify-center overflow-hidden rounded-full h-12 px-6 bg-primary text-white text-base font-bold leading-normal tracking-wide">
                   <span className="truncate">Registrar nuevo paciente</span>
                 </button>
               </div>
@@ -116,7 +120,7 @@ export default function GenerateProgressNote() {
 
             {/* Submit button */}
             <div className="mt-12 text-center">
-              <button className="flex min-w-[240px] max-w-sm mx-auto cursor-pointer items-center justify-center overflow-hidden rounded-full h-14 px-8 bg-primary text-white text-lg font-bold leading-normal tracking-wide">
+              <button onClick={() => navigate("/patient-progress-note-overview")} className="flex min-w-[240px] max-w-sm mx-auto cursor-pointer items-center justify-center overflow-hidden rounded-full h-14 px-8 bg-primary text-white text-lg font-bold leading-normal tracking-wide">
                 <span className="truncate">Generar nota de evolución</span>
               </button>
             </div>

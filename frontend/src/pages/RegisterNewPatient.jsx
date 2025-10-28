@@ -1,7 +1,12 @@
 // src/pages/RegisterNewPatient.jsx
 import React from "react";
+import { useNavigate } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
 
 export default function RegisterNewPatient() {
+
+  const navigate = useNavigate();
+
   return (
     <div className="relative flex h-auto min-h-screen w-full flex-col overflow-x-hidden bg-background-light dark:bg-background-dark font-display text-[#0d121b] dark:text-white">
       <div className="layout-container flex h-full grow flex-col">
@@ -27,7 +32,7 @@ export default function RegisterNewPatient() {
                   TerappIA
                 </h2>
               </div>
-              <button className="flex min-w-[84px] max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-lg h-10 px-4 bg-primary text-white text-sm font-bold leading-normal tracking-[0.015em]">
+              <button onClick={() => navigate("/generate-progress-note")} className="flex min-w-[84px] max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-lg h-10 px-4 bg-primary text-white text-sm font-bold leading-normal tracking-[0.015em]">
                 <span className="truncate">Regresar</span>
               </button>
             </div>
@@ -195,7 +200,7 @@ export default function RegisterNewPatient() {
 
             {/* Submit */}
             <div className="mt-12 flex justify-center">
-              <button className="flex min-w-[200px] max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-lg h-12 px-6 bg-primary text-white text-base font-bold leading-normal tracking-[0.015em]">
+              <button onClick={() => navigate ("/patient-list")} className="flex min-w-[200px] max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-lg h-12 px-6 bg-primary text-white text-base font-bold leading-normal tracking-[0.015em]">
                 <span className="truncate">Registrar paciente</span>
               </button>
             </div>

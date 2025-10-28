@@ -1,7 +1,22 @@
 // src/pages/PatientList.jsx
 import React from "react";
+import { useNavigate } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
 
 export default function PatientList() {
+
+  const navigate = useNavigate();
+  const { logout } = useAuth();
+  
+  const handleLogout = async () => {
+    try {
+      await logout();             // Firebase signOut via AuthContext
+      navigate("/login", { replace: true });
+    } catch (e) {
+      console.error("Logout failed:", e);
+    }
+  };
+
   return (
     <div className="flex min-h-screen bg-background-light dark:bg-background-dark font-display">
       {/* Sidebar */}
@@ -11,13 +26,14 @@ export default function PatientList() {
             Pacientes
           </h2>
           <nav className="flex flex-col gap-2">
-            <a
+            <button
+              onClick={() => navigate("/dashboard")}
               href="#"
               className="flex items-center gap-3 px-3 py-2 text-[#0d121b] dark:text-white"
             >
               <span className="material-symbols-outlined">dashboard</span>
               <span className="font-medium">Main dashboard</span>
-            </a>
+            </button>
             <a
               href="#"
               className="flex items-center gap-3 px-3 py-2 rounded-lg bg-[#e7ebf3] dark:bg-primary/30 text-[#0d121b] dark:text-white"
@@ -61,13 +77,13 @@ export default function PatientList() {
               <span className="material-symbols-outlined">settings</span>
               <span className="text-sm font-medium">Configuración</span>
             </a>
-            <a
+            <button onClick={handleLogout}
               href="#"
               className="flex items-center gap-3 px-3 py-2 text-[#0d121b] dark:text-white"
             >
               <span className="material-symbols-outlined">logout</span>
               <span className="text-sm font-medium">Cerrar sesión</span>
-            </a>
+            </button>
           </div>
         </div>
       </div>
@@ -119,10 +135,10 @@ export default function PatientList() {
           </div>
 
           <div className="flex gap-3">
-            <button className="flex min-w-[84px] items-center justify-center rounded-lg h-10 px-4 bg-primary text-white">
+            <button onClick={() => navigate("/generate-progress-note")} className="flex min-w-[84px] items-center justify-center rounded-lg h-10 px-4 bg-primary text-white">
               <span>Crear nueva nota</span>
             </button>
-            <button className="flex min-w-[84px] items-center justify-center rounded-lg h-10 px-4 bg-primary text-white">
+            <button onClick={() => navigate("/register-new-patient")} className="flex min-w-[84px] items-center justify-center rounded-lg h-10 px-4 bg-primary text-white">
               <span>Agregar paciente</span>
             </button>
           </div>

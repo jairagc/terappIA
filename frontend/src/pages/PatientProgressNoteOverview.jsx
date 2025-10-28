@@ -1,7 +1,22 @@
 // src/pages/PatientProgressNoteOverview.jsx
 import React from "react";
+import { useNavigate } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
 
-export default function PatientProgressNoteOverview() {
+export default function PatientList() {
+
+  const navigate = useNavigate();
+  const { logout } = useAuth();
+  
+  const handleLogout = async () => {
+    try {
+      await logout();             // Firebase signOut via AuthContext
+      navigate("/login", { replace: true });
+    } catch (e) {
+      console.error("Logout failed:", e);
+    }
+  };
+  
   return (
     <div className="relative flex h-auto min-h-screen w-full flex-col overflow-x-hidden lg:flex-row bg-background-light dark:bg-background-dark font-display text-[#0d121b] dark:text-white">
       {/* Sidebar */}
@@ -13,7 +28,7 @@ export default function PatientProgressNoteOverview() {
             </h3>
             <nav className="space-y-2">
               <a
-                href="#"
+                onClick={() => navigate("/dashboard")}
                 className="flex items-center gap-3 p-2 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-primary/10 dark:hover:bg-primary/20"
               >
                 <span className="material-symbols-outlined">dashboard</span>
@@ -51,13 +66,13 @@ export default function PatientProgressNoteOverview() {
             <span className="material-symbols-outlined">settings</span>
             <span>Configuración</span>
           </a>
-          <a
-            href="#"
+          <button
+            onClick={handleLogout}
             className="flex items-center gap-3 p-2 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700"
           >
             <span className="material-symbols-outlined">logout</span>
             <span>Cerrar sesión</span>
-          </a>
+          </button>
         </div>
       </aside>
 
