@@ -4,3 +4,7 @@ httpx>=0.24
 pydantic>=2.6
 python-multipart>=0.0.9
 firebase-admin>=6.5.0
+google-cloud-vision>=3.4.4
+google-cloud-storage>=3.4.1
+vertexai>=0.0.1
+google-cloud-firestore>=2.21.0

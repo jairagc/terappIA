@@ -2,14 +2,21 @@
 # OCR (puerto 8002)
 uvicorn OCR:app --host 0.0.0.0 --port 8002 --reload
 
+
 # Análisis (puerto 8001)
 uvicorn Analysis:app --host 0.0.0.0 --port 8001 --reload
+
 
 # Transcriptor de audio (puerto 8003)
 uvicorn Audio_transcriber:app --host 0.0.0.0 --port 8003 --reload
 
+
 # Orquestador (puerto 8080)
 uvicorn Orchestrator:app --host 0.0.0.0 --port 8080 --reload
+
+# in /backend/orquestador
+uvicorn orchestrator:app --host 0.0.0.0 --port 8080 --reload
+
 
 Pruebas rápidas
 Windows CMD, par ala imagen (OCR)
