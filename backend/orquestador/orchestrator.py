@@ -66,19 +66,40 @@ READ_TIMEOUT    = float(os.getenv("ORC_READ_TIMEOUT", "120"))
 
 # ──────────────────────────────────────────────────────────────────────────────
 app = FastAPI(title="Orquestador (Foto→OCR→Análisis | Audio→Transcripción→Análisis)")
-
+FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "http://localhost:5173")
+from fastapi.middleware.cors import CORSMiddleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[FRONTEND_ORIGIN],   # o ["*"] mientras pruebas
+    allow_credentials=True,
+    allow_methods=["POST", "OPTIONS"], # incluye OPTIONS para preflight
+    allow_headers=["*"],               # o explícito: ["Authorization","Content-Type"]
+)
 class OrquestacionFotoRespuesta(BaseModel):
     mensaje: str
     user_id: Optional[str]
+    note_id: str
     ocr: Dict[str, Any]
-    analisis: Dict[str, Any]
+    analisis: Optional[Dict[str, Any]] = None
 
 class OrquestacionAudioRespuesta(BaseModel):
     mensaje: str
     user_id: Optional[str]
+    note_id: str
     transcripcion: Dict[str, Any]
-    analisis: Dict[str, Any]
+    analisis: Optional[Dict[str, Any]] = None
 
+class GuardarNotaIn(BaseModel):
+    org_id: str
+    patient_id: str
+    session_id: str
+    note_id: str
+    texto: str
+
+class GuardarNotaOut(BaseModel):
+    mensaje: str
+    note_id: str
+    analisis: Dict[str, Any]
 # ──────────────────────────────────────────────────────────────────────────────
 async def _save_note_to_firestore(
     db_client,
@@ -150,19 +171,15 @@ def health():
 # FOTO → OCR → ANÁLISIS
 @app.post("/orquestar_foto", response_model=OrquestacionFotoRespuesta)
 async def orquestar_foto(
-    file: UploadFile = File(None, description="Imagen (jpg/png/…)"),
-    gcs_uri: Optional[str] = Form(default=None, description="gs://bucket/ruta/imagen"),
+    file: UploadFile = File(None),
+    gcs_uri: Optional[str] = Form(default=None),
     patient_id: str = Form(...),
     session_id: str = Form(...),
     org_id: str = Form(...),
+    analyze_now: bool = Form(default=False),              # <- NUEVO
     current_user: dict = Depends(get_current_user),
     authorization: Optional[str] = Header(default=None, alias="Authorization"),
 ):
-    """
-    Si viene 'file': lo manda a OCR como multipart.
-    Si viene 'gcs_uri': lo manda a OCR como form-data (sin file).
-    Luego pasa el 'texto' devuelto por OCR DIRECTO al análisis (JSON).
-    """
     effective_user_id = current_user.get("uid")
     if not file and not gcs_uri:
         raise HTTPException(status_code=400, detail="Envía 'file' o 'gcs_uri'.")
@@ -176,161 +193,161 @@ async def orquestar_foto(
     }
     headers = build_forward_headers(authorization, effective_user_id)
 
-    try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(READ_TIMEOUT, connect=CONNECT_TIMEOUT)) as client:
-            # OCR
-            if file is not None:
-                file_bytes = await file.read()
-                if not file_bytes:
-                    raise HTTPException(status_code=400, detail="Archivo vacío o no válido.")
-                files = {
-                    "file": (
-                        file.filename or "upload.bin",
-                        file_bytes,
-                        file.content_type or "application/octet-stream",
-                    )
-                }
-                ocr_resp = await client.post(OCR_URL, files=files, data=downstream_form, headers=headers)
-            else:
-                form = {**downstream_form, "gcs_uri": gcs_uri}
-                ocr_resp = await client.post(OCR_URL, data=form, headers=headers)
+    async with httpx.AsyncClient(timeout=httpx.Timeout(READ_TIMEOUT, connect=CONNECT_TIMEOUT)) as client:
+        # OCR
+        if file is not None:
+            file_bytes = await file.read()
+            if not file_bytes:
+                raise HTTPException(status_code=400, detail="Archivo vacío o no válido.")
+            files = {"file": (file.filename or "upload.bin", file_bytes, file.content_type or "application/octet-stream")}
+            ocr_resp = await client.post(OCR_URL, files=files, data=downstream_form, headers=headers)
+        else:
+            form = {**downstream_form, "gcs_uri": gcs_uri}
+            ocr_resp = await client.post(OCR_URL, data=form, headers=headers)
 
-            if ocr_resp.status_code >= 400:
-                raise HTTPException(status_code=ocr_resp.status_code, detail=f"OCR error: {ocr_resp.text}")
-            ocr_json = ocr_resp.json()
+        if ocr_resp.status_code >= 400:
+            raise HTTPException(status_code=ocr_resp.status_code, detail=f"OCR error: {ocr_resp.text}")
+        ocr_json = ocr_resp.json()
 
-            # Análisis
+        analysis_json = None
+        if analyze_now:
             texto_detectado = (ocr_json.get("resultado", {}).get("texto") or "").strip()
-            analysis_payload = {
-                "texto": texto_detectado,
-                "org_id": org_id,
-                "patient_id": patient_id,
-                "session_id": session_id,
-                "note_id": note_id,
-            }
-            an_resp = await client.post(ANALYSIS_URL, json=analysis_payload, headers=headers)
+            an_payload = {**downstream_form, "texto": texto_detectado}
+            an_resp = await client.post(ANALYSIS_URL, json=an_payload, headers=headers)
             if an_resp.status_code >= 400:
                 raise HTTPException(status_code=an_resp.status_code, detail=f"Análisis error: {an_resp.text}")
             analysis_json = an_resp.json()
 
-        # Persistencia opcional en Firestore
-        source_gcs_uri = ocr_json.get("imagen_gcs") if file else gcs_uri
-        await _save_note_to_firestore(
-            db_client=db,
-            org_id=org_id,
-            doctor_uid=effective_user_id,
-            patient_id=patient_id,
-            session_id=session_id,
-            note_id=note_id,
-            note_type="image",
-            source_type="upload" if file else "gcs_uri",
-            source_gcs_uri=source_gcs_uri,
-            text_content=texto_detectado,
-            analysis_result=analysis_json,
-        )
+        # Solo persistimos si ya analizamos (confirmación humana vendrá después si no)
+        if analysis_json:
+            source_gcs_uri = ocr_json.get("imagen_gcs") if file else gcs_uri
+            await _save_note_to_firestore(
+                db_client=db,
+                org_id=org_id,
+                doctor_uid=effective_user_id,
+                patient_id=patient_id,
+                session_id=session_id,
+                note_id=note_id,
+                note_type="image",
+                source_type="upload" if file else "gcs_uri",
+                source_gcs_uri=source_gcs_uri,
+                text_content=(ocr_json.get("resultado", {}).get("texto") or ""),
+                analysis_result=analysis_json,
+            )
 
-        return {
-            "mensaje": "Pipeline completado (foto)",
-            "user_id": effective_user_id,
-            "ocr": ocr_json,
-            "analisis": analysis_json,
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return {
+        "mensaje": "OCR listo (pendiente de confirmación)" if not analyze_now else "Pipeline completado (foto)",
+        "user_id": effective_user_id,
+        "note_id": note_id,
+        "ocr": ocr_json,
+        "analisis": analysis_json,
+    }
 
 # AUDIO → TRANSCRIPCIÓN → ANÁLISIS
 @app.post("/orquestar_audio", response_model=OrquestacionAudioRespuesta)
 async def orquestar_audio(
-    file: UploadFile = File(None, description="Audio (mp3, m4a, wav, etc.)"),
-    gcs_uri: Optional[str] = Form(default=None, description="gs://bucket/ruta/audio"),
+    file: UploadFile = File(None),
+    gcs_uri: Optional[str] = Form(default=None),
     patient_id: str = Form(...),
     session_id: str = Form(...),
     org_id: str = Form(...),
+    analyze_now: bool = Form(default=False),              # <- NUEVO
     current_user: dict = Depends(get_current_user),
     authorization: Optional[str] = Header(default=None, alias="Authorization"),
 ):
-    """
-    Si viene 'file': lo manda al transcriber como multipart (él sube a GCS).
-    Si viene 'gcs_uri': lo manda al transcriber como form-data.
-    Luego pasa el 'texto' transcrito DIRECTO al análisis (JSON).
-    """
     effective_user_id = current_user.get("uid")
     if not file and not gcs_uri:
         raise HTTPException(status_code=400, detail="Envía 'file' o 'gcs_uri'.")
 
     note_id = str(uuid.uuid4())
-    downstream_form = {
-        "org_id": org_id,
-        "patient_id": patient_id,
-        "session_id": session_id,
-        "note_id": note_id,
-    }
+    downstream_form = { "org_id": org_id, "patient_id": patient_id, "session_id": session_id, "note_id": note_id }
     headers = build_forward_headers(authorization, effective_user_id)
 
-    try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(READ_TIMEOUT, connect=CONNECT_TIMEOUT)) as client:
-            # Transcripción
-            if file is not None:
-                file_bytes = await file.read()
-                if not file_bytes:
-                    raise HTTPException(status_code=400, detail="Archivo vacío o no válido.")
-                files = {
-                    "file": (
-                        file.filename or "audio.bin",
-                        file_bytes,
-                        file.content_type or "audio/mpeg",
-                    )
-                }
-                tr_resp = await client.post(AUDIO_URL, files=files, data=downstream_form, headers=headers)
-            else:
-                form = {**downstream_form, "gcs_uri": gcs_uri}
-                tr_resp = await client.post(AUDIO_URL, data=form, headers=headers)
+    async with httpx.AsyncClient(timeout=httpx.Timeout(READ_TIMEOUT, connect=CONNECT_TIMEOUT)) as client:
+        # Transcripción
+        if file is not None:
+            file_bytes = await file.read()
+            if not file_bytes:
+                raise HTTPException(status_code=400, detail="Archivo vacío o no válido.")
+            files = {"file": (file.filename or "audio.bin", file_bytes, file.content_type or "audio/mpeg")}
+            tr_resp = await client.post(AUDIO_URL, files=files, data=downstream_form, headers=headers)
+        else:
+            form = {**downstream_form, "gcs_uri": gcs_uri}
+            tr_resp = await client.post(AUDIO_URL, data=form, headers=headers)
 
-            if tr_resp.status_code >= 400:
-                raise HTTPException(status_code=tr_resp.status_code, detail=f"Audio error: {tr_resp.text}")
-            tr_json = tr_resp.json()
+        if tr_resp.status_code >= 400:
+            raise HTTPException(status_code=tr_resp.status_code, detail=f"Audio error: {tr_resp.text}")
+        tr_json = tr_resp.json()
 
-            # Análisis
+        analysis_json = None
+        if analyze_now:
             texto = (tr_json.get("resultado", {}).get("texto") or "").strip()
-            analysis_payload = {
-                "texto": texto,
-                "org_id": org_id,
-                "patient_id": patient_id,
-                "session_id": session_id,
-                "note_id": note_id,
-            }
-            an_resp = await client.post(ANALYSIS_URL, json=analysis_payload, headers=headers)
+            an_payload = {**downstream_form, "texto": texto}
+            an_resp = await client.post(ANALYSIS_URL, json=an_payload, headers=headers)
             if an_resp.status_code >= 400:
                 raise HTTPException(status_code=an_resp.status_code, detail=f"Análisis error: {an_resp.text}")
             analysis_json = an_resp.json()
 
-        # Persistencia opcional en Firestore
-        source_gcs_uri = tr_json.get("audio_gcs") if file else gcs_uri
-        await _save_note_to_firestore(
-            db_client=db,
-            org_id=org_id,
-            doctor_uid=effective_user_id,
-            patient_id=patient_id,
-            session_id=session_id,
-            note_id=note_id,
-            note_type="audio",
-            source_type="upload" if file else "gcs_uri",
-            source_gcs_uri=source_gcs_uri,
-            text_content=texto,
-            analysis_result=analysis_json,
-        )
+        if analysis_json:
+            source_gcs_uri = tr_json.get("audio_gcs") if file else gcs_uri
+            await _save_note_to_firestore(
+                db_client=db,
+                org_id=org_id,
+                doctor_uid=effective_user_id,
+                patient_id=patient_id,
+                session_id=session_id,
+                note_id=note_id,
+                note_type="audio",
+                source_type="upload" if file else "gcs_uri",
+                source_gcs_uri=source_gcs_uri,
+                text_content=(tr_json.get("resultado", {}).get("texto") or ""),
+                analysis_result=analysis_json,
+            )
 
-        return {
-            "mensaje": "Pipeline completado (audio)",
-            "user_id": effective_user_id,
-            "transcripcion": tr_json,
-            "analisis": analysis_json,
-        }
+    return {
+        "mensaje": "Transcripción lista (pendiente de confirmación)" if not analyze_now else "Pipeline completado (audio)",
+        "user_id": effective_user_id,
+        "note_id": note_id,
+        "transcripcion": tr_json,
+        "analisis": analysis_json,
+    }
 
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+@app.post("/guardar_nota", response_model=GuardarNotaOut)
+async def guardar_nota(
+    payload: GuardarNotaIn,
+    current_user: dict = Depends(get_current_user),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    effective_user_id = current_user.get("uid")
+    headers = build_forward_headers(authorization, effective_user_id)
+
+    # 1) Analizar una sola vez con el texto final
+    an_payload = {
+        "texto": payload.texto,
+        "org_id": payload.org_id,
+        "patient_id": payload.patient_id,
+        "session_id": payload.session_id,
+        "note_id": payload.note_id,
+    }
+    async with httpx.AsyncClient(timeout=httpx.Timeout(READ_TIMEOUT, connect=CONNECT_TIMEOUT)) as client:
+        an_resp = await client.post(ANALYSIS_URL, json=an_payload, headers=headers)
+        if an_resp.status_code >= 400:
+            raise HTTPException(status_code=an_resp.status_code, detail=f"Análisis error: {an_resp.text}")
+        analysis_json = an_resp.json()
+
+    # 2) Persistir en Firestore
+    await _save_note_to_firestore(
+        db_client=db,
+        org_id=payload.org_id,
+        doctor_uid=effective_user_id,
+        patient_id=payload.patient_id,
+        session_id=payload.session_id,
+        note_id=payload.note_id,
+        note_type="text",
+        source_type="final",
+        source_gcs_uri=None,
+        text_content=payload.texto,
+        analysis_result=analysis_json,
+    )
+
+    return {"mensaje": "Nota guardada y analizada", "note_id": payload.note_id, "analisis": analysis_json}
