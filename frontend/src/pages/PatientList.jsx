@@ -143,8 +143,11 @@ export default function PatientList() {
             </button>
           </div>
         </div>
-
+        
+        
         {/* Patient Cards */}
+
+        {/* 
         <div className="mt-6 space-y-4">
           {[
             {
@@ -201,6 +204,7 @@ export default function PatientList() {
             </React.Fragment>
           ))}
         </div>
+        */}
       </div>
     </div>
   );
