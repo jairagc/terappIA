@@ -1,6 +1,6 @@
 // src/pages/MainDashboard.jsx
 import React from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, NavLink } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
 export default function MainDashboard() {
@@ -9,7 +9,7 @@ export default function MainDashboard() {
 
   const handleLogout = async () => {
     try {
-      await logout();             // Firebase signOut via AuthContext
+      await logout(); // Firebase signOut via AuthContext
       navigate("/login", { replace: true });
     } catch (e) {
       console.error("Logout failed:", e);
@@ -26,7 +26,7 @@ export default function MainDashboard() {
           </span>
           <h1 className="text-xl font-bold">TerappIA</h1>
         </div>
-        
+
         {/* Exit / Logout */}
         <button
           onClick={handleLogout}
@@ -45,20 +45,28 @@ export default function MainDashboard() {
             Barra rápida
           </div>
           <nav className="flex flex-col space-y-2">
-            <a
-              href="#"
+            {/* Perfil -> navega a /profile */}
+            <NavLink
+              to="/profile"
               className="flex items-center gap-3 rounded-lg px-3 py-2 text-text-primary hover:bg-calm-blue"
             >
               <span className="material-symbols-outlined">build</span>
               <span>Perfil</span>
-            </a>
-            <a
-              href="#"
-              className="flex items-center gap-3 rounded-lg px-3 py-2 text-text-primary hover:bg-calm-blue"
+            </NavLink>
+
+            {/* Configuración (placeholder por ahora) */}
+            <button
+              type="button"
+              className="flex items-center gap-3 rounded-lg px-3 py-2 text-left text-text-primary hover:bg-calm-blue"
+              onClick={() => {
+                /* aquí puedes navegar cuando tengas la ruta, ej:
+                   navigate('/settings');
+                */
+              }}
             >
               <span className="material-symbols-outlined">settings</span>
               <span>Configuración</span>
-            </a>
+            </button>
           </nav>
         </aside>
 
@@ -78,7 +86,10 @@ export default function MainDashboard() {
               <p className="mb-6 text-text-secondary">
                 Genera y modifica notas de evolución.
               </p>
-              <button onClick={() => navigate("/generate-progress-note")} className="flex min-w-[84px] cursor-pointer items-center justify-center rounded-lg bg-dark-navy px-5 py-3 text-base font-bold text-white shadow-md transition-colors duration-300 hover:bg-opacity-90">
+              <button
+                onClick={() => navigate("/generate-progress-note")}
+                className="flex min-w-[84px] cursor-pointer items-center justify-center rounded-lg bg-dark-navy px-5 py-3 text-base font-bold text-white shadow-md transition-colors duration-300 hover:bg-opacity-90"
+              >
                 Generar notas
               </button>
             </div>
@@ -96,7 +107,10 @@ export default function MainDashboard() {
               <p className="mb-6 text-text-secondary">
                 Revisa y analiza notas previamente registradas.
               </p>
-              <button onClick={() => navigate("/patient-progress-note-overview")} className="flex min-w-[84px] cursor-pointer items-center justify-center rounded-lg bg-dark-navy px-5 py-3 text-base font-bold text-white shadow-md transition-colors duration-300 hover:bg-opacity-90">
+              <button
+                onClick={() => navigate("/patient-progress-note-overview")}
+                className="flex min-w-[84px] cursor-pointer items-center justify-center rounded-lg bg-dark-navy px-5 py-3 text-base font-bold text-white shadow-md transition-colors duration-300 hover:bg-opacity-90"
+              >
                 Consultar notas
               </button>
             </div>

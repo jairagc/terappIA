@@ -9,6 +9,7 @@ const GenerateProgressNote = lazy(() => import("./pages/GenerateProgressNote.jsx
 const PatientList = lazy(() => import("./pages/PatientList.jsx"));
 const RegisterNewPatient = lazy(() => import("./pages/RegisterNewPatient.jsx"));
 const PatientProgressNoteOverview = lazy(() => import("./pages/PatientProgressNoteOverview.jsx"));
+const Profile = lazy(() => import("./pages/profile.jsx")); // <-- NUEVO
 
 export default function App() {
   return (
@@ -57,6 +58,16 @@ export default function App() {
           element={
             <ProtectedRoute>
               <PatientProgressNoteOverview />
+            </ProtectedRoute>
+          }
+        />
+
+        {/* NUEVA RUTA: Perfil */}
+        <Route
+          path="/profile"
+          element={
+            <ProtectedRoute>
+              <Profile />
             </ProtectedRoute>
           }
         />
