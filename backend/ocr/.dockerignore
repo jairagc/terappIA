@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.env
+pruebas_ocr/
+data_local/
+.git
+.gitignore

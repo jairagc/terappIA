@@ -10,10 +10,6 @@ uvicorn Analysis:app --host 0.0.0.0 --port 8001 --reload
 # Transcriptor de audio (puerto 8003)
 uvicorn Audio_transcriber:app --host 0.0.0.0 --port 8003 --reload
 
-
-# Orquestador (puerto 8080)
-uvicorn Orchestrator:app --host 0.0.0.0 --port 8080 --reload
-
 # in /backend/orquestador
 uvicorn orchestrator:app --host 0.0.0.0 --port 8080 --reload
 
@@ -111,3 +107,8 @@ curl -X POST "http://localhost:8000/orquestar_foto" \
      -F "org_id=clinica_demo" \
      -F "patient_id=paciente_001" \
      -F "session_id=sesion_abc"
+```
+
+## comandos:
+gcloud builds submit --tag us-central1-docker.pkg.dev/terapia-471517/terappia/frontend:latest .
+gcloud builds submit --tag us-central1-docker.pkg.dev/terapia-471517/terappia/orchestrator:latest .

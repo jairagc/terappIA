@@ -1,0 +1,11 @@
+fastapi>=0.110,<1.0
+uvicorn[standard]>=0.27
+httpx>=0.24
+pydantic>=2.6
+python-multipart>=0.0.9
+google-cloud-vision>=3.4.0
+google-cloud-storage>=2.14.0
+google-auth>=2.27
+grpcio>=1.64
+protobuf>=4.25.3
+packaging>=23.2

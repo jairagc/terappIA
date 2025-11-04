@@ -1,210 +1,326 @@
 // src/pages/PatientList.jsx
-import React from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { db } from "../services/firebaseConfig";
+import { collection, getDocs, orderBy, query } from "firebase/firestore";
+
+// Sidebar reutilizable y perfil del doctor
+import AppSidebar from "../components/AppSidebar";
+import { useDoctorProfile } from "../services/userDoctorProfile";
 
 export default function PatientList() {
-
   const navigate = useNavigate();
-  const { logout } = useAuth();
-  
+  const { user, logout } = useAuth();
+  const uid = user?.uid || null;
+
+  // Perfil (trae orgId preferentemente de Firestore)
+  const { orgId: orgFromProfile } = useDoctorProfile(
+    user?.uid,
+    user?.displayName,
+    user?.photoURL,
+    user?.email
+  );
+
+  const [orgId, setOrgId] = useState("");
+  const [patients, setPatients] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState("");
+
+  // UI
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [search, setSearch] = useState("");
+
+  // orgId: perfil ➜ localStorage
+  useEffect(() => {
+    const cachedOrg = localStorage.getItem("orgId") || "";
+    setOrgId(orgFromProfile || cachedOrg);
+  }, [orgFromProfile]);
+
+  // Cargar pacientes
+  useEffect(() => {
+    let alive = true;
+    async function loadPatients() {
+      try {
+        setLoading(true);
+        setErr("");
+        setPatients([]);
+        if (!uid || !orgId) {
+          setLoading(false);
+          return;
+        }
+        const colRef = collection(db, "orgs", orgId, "doctors", uid, "patients");
+        const qy = query(colRef, orderBy("fullName"));
+        const snap = await getDocs(qy);
+        if (!alive) return;
+        const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        setPatients(rows);
+      } catch (e) {
+        console.error("Error cargando pacientes:", e);
+        if (alive) setErr("No se pudieron cargar los pacientes.");
+      } finally {
+        alive && setLoading(false);
+      }
+    }
+    loadPatients();
+    return () => {
+      alive = false;
+    };
+  }, [uid, orgId]);
+
   const handleLogout = async () => {
     try {
-      await logout();             // Firebase signOut via AuthContext
+      await logout();
       navigate("/login", { replace: true });
     } catch (e) {
       console.error("Logout failed:", e);
     }
   };
 
+  const initials = (name = "") =>
+    name
+      .split(" ")
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((s) => s[0]?.toUpperCase())
+      .join("") || "P";
+
+  const headerTitle = useMemo(
+    () => (orgId ? `Pacientes — ${orgId}` : "Pacientes"),
+    [orgId]
+  );
+
+  const filtered = useMemo(() => {
+    if (!search.trim()) return patients;
+    const q = search.toLowerCase();
+    return patients.filter((p) => {
+      const haystack = [
+        p.fullName,
+        p.email,
+        p.phone,
+        p.address,
+        p.id,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(q);
+    });
+  }, [patients, search]);
+
   return (
-    <div className="flex min-h-screen bg-background-light dark:bg-background-dark font-display">
-      {/* Sidebar */}
-      <div className="w-64 bg-[#f5f5f5] dark:bg-gray-800 p-4 flex flex-col justify-between rounded-r-xl">
-        <div>
-          <h2 className="text-xl font-bold mb-8 text-[#0d121b] dark:text-white">
-            Pacientes
-          </h2>
-          <nav className="flex flex-col gap-2">
-            <button
-              onClick={() => navigate("/dashboard")}
-              href="#"
-              className="flex items-center gap-3 px-3 py-2 text-[#0d121b] dark:text-white"
-            >
-              <span className="material-symbols-outlined">dashboard</span>
-              <span className="font-medium">Main dashboard</span>
-            </button>
-            <a
-              href="#"
-              className="flex items-center gap-3 px-3 py-2 rounded-lg bg-[#e7ebf3] dark:bg-primary/30 text-[#0d121b] dark:text-white"
-            >
-              <span
-                className="material-symbols-outlined"
-                style={{ fontVariationSettings: "'FILL' 1" }}
-              >
-                group
-              </span>
-              <span className="font-medium">Pacientes</span>
-            </a>
-          </nav>
-        </div>
+    <div className="flex h-screen bg-background-light dark:bg-background-dark font-display">
+      {/* Sidebar unificado */}
+      <AppSidebar collapsed={sidebarCollapsed} />
 
-        {/* User info */}
-        <div className="flex flex-col gap-4">
+      {/* Contenedor principal */}
+      <div className="flex-1 flex flex-col">
+        {/* Header con toggle, mantiene tu estética */}
+        <header className="h-16 flex items-center justify-between px-4 sm:px-6 bg-white dark:bg-[#0f1520] shadow-sm">
           <div className="flex items-center gap-3">
-            <div
-              className="bg-center bg-no-repeat aspect-square bg-cover rounded-full size-10"
-              style={{
-                backgroundImage:
-                  "url('https://lh3.googleusercontent.com/aida-public/AB6AXuA0b5HsP6gzFWC--bW-J5g4oUlPfiZyfdWzHY81CCGXpZCV5GEE5gS6fqzvHreBfS_DvznwOXICvckFa5n2arTTElXLLfATdZm-K3pGJB-aHYCvx6sSHkuZ4oIw1AO0boJVBzkGB0nFpc5FjMS1xA1pl9A3qmkieVc0Xn-c8lVDJ8vvtl1SnQ-PrVkJtdz8x8iAchU_Rg82no6ttOzJPqAMdiXc-ivfTS6peGXLRPUND6qjf0wYwf5uI5TaarQmkk4EPXqrJkbiTnE')",
-              }}
-            ></div>
-            <div className="flex flex-col">
-              <h1 className="text-[#0d121b] dark:text-white text-base font-medium">
-                Doctor
-              </h1>
-              <p className="text-blue-500 text-sm font-normal">
-                doctor@example.com
-              </p>
-            </div>
+            <button
+              onClick={() => setSidebarCollapsed((v) => !v)}
+              className="rounded-lg p-2 hover:bg-gray-100 dark:hover:bg-gray-800"
+              title={sidebarCollapsed ? "Expandir menú" : "Colapsar menú"}
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                className="w-6 h-6"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={1.5}
+                  d="M3.75 6.75h16.5M3.75 12h16.5M3.75 17.25h16.5"
+                />
+              </svg>
+            </button>
+            <h1 className="text-lg sm:text-xl font-bold tracking-tight">
+              {headerTitle}
+            </h1>
           </div>
 
-          <div className="flex flex-col gap-1">
-            <a
-              href="#"
-              className="flex items-center gap-3 px-3 py-2 text-[#0d121b] dark:text-white"
+          <div className="hidden sm:flex items-center gap-3">
+            <button
+              onClick={() => navigate("/generate-progress-note")}
+              className="inline-flex items-center rounded-full h-10 px-4 bg-primary text-white font-semibold"
             >
-              <span className="material-symbols-outlined">settings</span>
-              <span className="text-sm font-medium">Configuración</span>
-            </a>
-            <button onClick={handleLogout}
-              href="#"
-              className="flex items-center gap-3 px-3 py-2 text-[#0d121b] dark:text-white"
+              Nueva nota
+            </button>
+            <button
+              onClick={() => navigate("/register-new-patient")}
+              className="inline-flex items-center rounded-full h-10 px-4 bg-primary text-white font-semibold"
             >
-              <span className="material-symbols-outlined">logout</span>
-              <span className="text-sm font-medium">Cerrar sesión</span>
+              Agregar paciente
+            </button>
+            <button
+              onClick={handleLogout}
+              className="inline-flex items-center rounded-full h-10 px-4 bg-gray-200 dark:bg-gray-700 font-semibold"
+            >
+              Cerrar sesión
             </button>
           </div>
-        </div>
-      </div>
-
-      {/* Main Content */}
-      <div className="flex-1 p-8">
-        <header>
-          <p className="text-[#0d121b] dark:text-white text-4xl font-black tracking-[-0.033em]">
-            Lista de pacientes del usuario
-          </p>
         </header>
 
-        {/* Filters */}
-        <div className="mt-6 p-3 rounded-lg bg-[#f5f5f5] dark:bg-gray-800 flex items-center justify-between">
-          <div className="flex items-center gap-3 flex-wrap">
-            {["Búsqueda avanzada", "Últimos 7 días", "Importancia"].map(
-              (label) => (
-                <button
-                  key={label}
-                  className="flex h-8 items-center justify-center gap-x-2 rounded-full bg-white dark:bg-gray-700 px-4"
-                >
-                  <p className="text-[#0d121b] dark:text-white text-sm font-medium">
-                    {label}
-                  </p>
-                  <span className="material-symbols-outlined text-[#0d121b] dark:text-white text-base">
-                    expand_more
-                  </span>
-                </button>
-              )
-            )}
-            <div className="flex items-center gap-2">
-              <label
-                htmlFor="search-date"
-                className="text-sm font-medium text-[#0d121b] dark:text-white"
-              >
-                Buscar por fecha:
-              </label>
-              <input
-                id="search-date"
-                type="date"
-                className="h-8 rounded-full border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm"
-              />
+        {/* Main */}
+        <main className="flex-1 overflow-y-auto px-4 sm:px-6 py-8">
+          {/* Avisos org */}
+          {!orgId && (
+            <div className="mb-4 rounded-md bg-yellow-50 p-3 text-yellow-800">
+              ⚠️ Primero captura tu <strong>Organización</strong> en <strong>Perfil</strong>.
             </div>
-            <button className="flex h-8 items-center justify-center gap-x-2 rounded-full bg-white dark:bg-gray-700 px-4">
-              <p className="text-[#0d121b] dark:text-white text-sm font-medium">
-                Aplicar filtros
-              </p>
-            </button>
-          </div>
+          )}
+          {err && (
+            <div className="mb-4 rounded-md bg-red-50 p-3 text-red-700">{err}</div>
+          )}
 
-          <div className="flex gap-3">
-            <button onClick={() => navigate("/generate-progress-note")} className="flex min-w-[84px] items-center justify-center rounded-lg h-10 px-4 bg-primary text-white">
-              <span>Crear nueva nota</span>
-            </button>
-            <button onClick={() => navigate("/register-new-patient")} className="flex min-w-[84px] items-center justify-center rounded-lg h-10 px-4 bg-primary text-white">
-              <span>Agregar paciente</span>
-            </button>
-          </div>
-        </div>
-        
-        
-        {/* Patient Cards */}
-
-        {/* 
-        <div className="mt-6 space-y-4">
-          {[
-            {
-              name: "Nota de evolución. Paciente XXYX",
-              desc: "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.",
-              initials: "AB",
-              sessions: "45 sesiones, 15 faltantes",
-              img: "https://lh3.googleusercontent.com/aida-public/AB6AXuCkW2G-TSKlDZ35FTcohux_3Ojk6u0cjVJh5Me-BgRRYiLDAR5nVcjHCEu50c0mIdYrpe3MweYkuMsSrAny7uJvYkLX7D809SsMneITJbbWtgkHRA7XR_iU1uYyTwybg22PiVwPKo8SG4oimn6Ei3KgABbgAb34uHQdC825Ja2a26ThOlvzj4PyVRoeLVZM07iKkr-WllXi1t05JzU0dZZQXLMQqh7thRp-hyvBcuq3l0mDNvZ_Vtl_CC0OnSNGAOeutmttcTUxbBA",
-            },
-            {
-              name: "Nota de evolución. Paciente ZWPV",
-              desc: "Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.",
-              initials: "CD",
-              sessions: "30 sesiones, 5 faltantes",
-              img: "https://lh3.googleusercontent.com/aida-public/AB6AXuBDCGxjiqzGdHNLR3k_3XvuDZ2I2v9SsuW4onXVPi1pO5yLWQNGy6XzszRMexSbEmjbQN33Es6lwrtx9jglC0l36xTacuH5Se-04Sn4oJA0zWp4TJIL_72FuSqpR5_s4L_PHCXBhKcLeJx_0QOJV0MeUlLpKjXxCJSW18ZDcb4Tw46z9lYOP37wXanIXA9jTeFoI5brHXlJAp3K9RBnXeAcAVXjDj-BLqE3GJ_xJjRz5Ht7OOn7r3jSVF4XklDH17SCCJJUGmZKEhA",
-            },
-            {
-              name: "Nota de evolución. Paciente MNQR",
-              desc: "Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.",
-              initials: "EF",
-              sessions: "60 sesiones, 30 faltantes",
-              img: "https://lh3.googleusercontent.com/aida-public/AB6AXuBlwACkxpEoT6D4zqrzYTBVIxEb9YBYKnXj2eXZb2iR5EsJrMOu8KbnIm6HltwctfIxOrJiXh3RS77UDJnQ7H-v7tPeo1m2E0rz9737IRziJh9VkcoZQ1nyY2EwbyH_d_A8yr7BwRwoqeDOBBC_yKjpKodnlJcp3q7UOKIMQY4ep-nskhmtMZi7AgRz5cSmrOB_flLr3yk_fnMo-l-5Dai-UqozYFJEeAeEF99PaugIIuTw9v4AZSlpHBXo1IUYOVeufe8S1HFgbb4",
-            },
-          ].map((patient, i) => (
-            <React.Fragment key={i}>
-              <div className="bg-white dark:bg-gray-800 p-4 rounded-lg flex items-center gap-4">
-                <div
-                  className="bg-center bg-no-repeat aspect-square bg-cover rounded-full size-12"
-                  style={{ backgroundImage: `url('${patient.img}')` }}
-                ></div>
-                <div className="flex-grow">
-                  <p className="text-[#0d121b] dark:text-white text-base font-bold">
-                    {patient.name}
-                  </p>
-                  <p className="text-gray-500 dark:text-gray-400 text-sm mt-1">
-                    {patient.desc}
-                  </p>
-                </div>
-                <div className="text-center">
-                  <p className="text-[#0d121b] dark:text-white font-bold text-lg">
-                    {patient.initials}
-                  </p>
-                  <p className="text-gray-500 dark:text-gray-400 text-xs">
-                    {patient.sessions}
-                  </p>
-                </div>
-                <button className="flex items-center justify-center rounded-lg h-10 px-4 bg-[#e7ebf3] dark:bg-gray-700 text-[#0d121b] dark:text-white font-medium">
-                  Ver resumen
-                </button>
+          {/* Barra de acciones / filtros */}
+          <section className="rounded-xl bg-[#f5f5f5] dark:bg-gray-800 p-4 flex flex-col gap-4">
+            <div className="flex flex-wrap items-center gap-3 justify-between">
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center gap-2 rounded-full bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-200 px-3 py-1 text-sm font-medium">
+                  Total: {patients.length}
+                </span>
+                <span className="inline-flex items-center gap-2 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200 px-3 py-1 text-sm font-medium">
+                  Filtrados: {filtered.length}
+                </span>
               </div>
-              {i < 2 && (
-                <hr className="border-gray-200 dark:border-gray-700" />
+
+              <div className="relative w-full sm:w-80">
+                <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">
+                  search
+                </span>
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Buscar por nombre, email, teléfono…"
+                  className="w-full h-10 pl-10 pr-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm text-[#0d121b] dark:text-white"
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-3">
+              {["Búsqueda avanzada", "Últimos 7 días", "Importancia"].map(
+                (label) => (
+                  <button
+                    key={label}
+                    className="flex h-9 items-center justify-center gap-x-2 rounded-full bg-white dark:bg-gray-700 px-4 text-sm text-[#0d121b] dark:text-white"
+                    type="button"
+                  >
+                    {label}
+                    <span className="material-symbols-outlined text-base">
+                      expand_more
+                    </span>
+                  </button>
+                )
               )}
-            </React.Fragment>
-          ))}
-        </div>
-        */}
+              <div className="flex items-center gap-2">
+                <label className="text-sm font-medium text-[#0d121b] dark:text-white">
+                  Fecha:
+                </label>
+                <input
+                  type="date"
+                  className="h-9 rounded-full border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm px-3"
+                />
+              </div>
+              <button
+                type="button"
+                className="flex h-9 items-center justify-center gap-x-2 rounded-full bg-white dark:bg-gray-700 px-4 text-sm text-[#0d121b] dark:text-white"
+              >
+                Aplicar filtros
+              </button>
+
+            </div>
+          </section>
+
+          {/* Estados */}
+          {loading && (
+            <div className="mt-6 text-gray-600 dark:text-gray-300">
+              Cargando pacientes…
+            </div>
+          )}
+
+          {/* Lista / vacíos */}
+          {!loading && !err && (
+            <>
+              {filtered.length === 0 ? (
+                <div className="mt-6 rounded-xl bg-white dark:bg-gray-800 p-8 text-center">
+                  <p className="text-gray-700 dark:text-gray-300">
+                    {patients.length === 0
+                      ? "No hay pacientes. Agrega uno con el botón “Agregar paciente”."
+                      : "No hay resultados con el filtro/búsqueda."}
+                  </p>
+                </div>
+              ) : (
+                <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                  {filtered.map((p) => (
+                    <div
+                      key={p.id}
+                      className="bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-200 dark:border-gray-700 hover:shadow-md transition"
+                    >
+                      <div className="flex items-center gap-4">
+                        <div
+                          className="rounded-full size-12 flex items-center justify-center text-white font-bold"
+                          style={{ background: "#475569" }}
+                          title={p.fullName}
+                        >
+                          {initials(p.fullName)}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[#0d121b] dark:text-white text-base font-bold truncate">
+                            {p.fullName || p.id}
+                          </p>
+                          <p className="text-gray-500 dark:text-gray-400 text-sm truncate">
+                            {p.email || p.phone || p.address
+                              ? [p.email, p.phone, p.address]
+                                  .filter(Boolean)
+                                  .join(" · ")
+                              : "Sin datos de contacto"}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="mt-4 flex items-center justify-between">
+                        <span className="inline-block bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-200 px-2.5 py-1 rounded-full text-xs">
+                          ID: {p.id}
+                        </span>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() =>
+                              navigate("/generate-progress-note", {
+                                state: { patientId: p.id },
+                              })
+                            }
+                            className="rounded-lg h-9 px-3 bg-[#e7ebf3] dark:bg-gray-700 text-[#0d121b] dark:text-white text-sm font-medium"
+                          >
+                            Ver/crear nota
+                          </button>
+                          <button
+                            onClick={() => navigate("/patient-progress-note-overview", {
+                              state: {
+                                orgId,
+                                patientId: p.id,
+                                sessionId: null,
+                                noteId: null,
+                                source: "manual",
+                              },
+                            })}
+                            className="rounded-lg h-9 px-3 bg-gray-100 dark:bg-gray-600 text-sm"
+                          >
+                            Abrir detalle
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </main>
       </div>
     </div>
   );

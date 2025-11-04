@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.env
+data_local/
+pruebas_analisis/
+.git
+.gitignore

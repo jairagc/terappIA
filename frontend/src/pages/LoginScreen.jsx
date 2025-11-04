@@ -4,6 +4,7 @@ import { useNavigate, Navigate } from "react-router-dom";
 import {
   GoogleAuthProvider,
   signInWithPopup,
+  signInWithRedirect, // CHANGE
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
 } from "firebase/auth";
@@ -19,7 +20,7 @@ export default function LoginScreen() {
   const [password, setPassword] = useState("");
   const [err, setErr] = useState("");
 
-  // If already logged in, bounce to dashboard
+  // Si ya está logueado, respeta tu navegación original
   if (user) return <Navigate to="/dashboard" replace />;
 
   const handleEmailPass = async (e) => {
@@ -37,17 +38,41 @@ export default function LoginScreen() {
     }
   };
 
+  // CHANGE: helper para decidir fallback a redirect
+  const shouldFallbackToRedirect = (error) => {
+    const code = error?.code || "";
+    const msg = String(error?.message || "").toLowerCase();
+    return (
+      code === "auth/operation-not-supported-in-this-environment" ||
+      code === "auth/popup-blocked" ||
+      code === "auth/popup-closed-by-user" ||
+      code === "auth/web-storage-unsupported" ||
+      msg.includes("storage") ||
+      msg.includes("popup")
+    );
+  };
+
   const handleGoogle = async () => {
     setErr("");
+    const provider = new GoogleAuthProvider();
     try {
-      const provider = new GoogleAuthProvider();
-      await signInWithPopup(auth, provider);
-      navigate("/dashboard", { replace: true });
+      await signInWithPopup(auth, provider);            // popup primero
+      navigate("/dashboard", { replace: true });        // si funcionó popup, navega
     } catch (error) {
+      if (shouldFallbackToRedirect(error)) {            // CHANGE: fallback
+        try {
+          await signInWithRedirect(auth, provider);     // redirect en iOS/in-app
+          return; // al volver del IdP, AuthContext resolverá y redirigirá tu app
+        } catch (e2) {
+          setErr(e2.message);
+          return;
+        }
+      }
       setErr(error.message);
     }
   };
 
+  // === UI ORIGINAL MANTENIDA ===
   return (
     <div className="relative flex h-screen min-h-screen w-full flex-col items-center justify-center bg-background-light dark:bg-background-dark font-display overflow-hidden">
       {/* Background blobs */}
@@ -124,7 +149,7 @@ export default function LoginScreen() {
           <div className="h-px bg-light-gray/60 flex-1" />
         </div>
 
-        {/* Extra buttons (keep 2nd repo style) */}
+        {/* Extra buttons (tu estilo original) */}
         <div className="flex flex-col gap-3">
           <button
             onClick={handleGoogle}

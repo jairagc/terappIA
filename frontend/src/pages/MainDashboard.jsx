@@ -1,15 +1,105 @@
 // src/pages/MainDashboard.jsx
-import React from "react";
-import { useNavigate, NavLink } from "react-router-dom";
+import React, { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { db } from "../services/firebaseConfig";
+import { collection, getDocs } from "firebase/firestore";
+import AppSidebar from "../components/AppSidebar";
+import { useDoctorProfile } from "../services/userDoctorProfile";
 
 export default function MainDashboard() {
   const navigate = useNavigate();
-  const { logout } = useAuth();
+  const { user, logout } = useAuth();
+
+  const [collapsed, setCollapsed] = useState(false);
+  const [orgId, setOrgId] = useState(() => localStorage.getItem("orgId") || "");
+
+  const { name, photoURL } = useDoctorProfile(
+    user?.uid,
+    user?.displayName,
+    user?.photoURL
+  );
+
+  const [patientsCount, setPatientsCount] = useState(null);
+  const [notesCount, setNotesCount] = useState(null);
+  const [loadingStats, setLoadingStats] = useState(true);
+
+  useEffect(() => setOrgId(localStorage.getItem("orgId") || ""), []);
+
+  useEffect(() => {
+    let alive = true;
+    async function loadStats() {
+      if (!user?.uid || !orgId) {
+        setPatientsCount(0);
+        setNotesCount(0);
+        setLoadingStats(false);
+        return;
+      }
+      setLoadingStats(true);
+      try {
+        const patientsCol = collection(
+          db,
+          "orgs",
+          orgId,
+          "doctors",
+          user.uid,
+          "patients"
+        );
+        const patientsSnap = await getDocs(patientsCol);
+        if (!alive) return;
+        setPatientsCount(patientsSnap.size);
+
+        let totalNotes = 0;
+        for (const pDoc of patientsSnap.docs) {
+          const sessionsCol = collection(
+            db,
+            "orgs",
+            orgId,
+            "doctors",
+            user.uid,
+            "patients",
+            pDoc.id,
+            "sessions"
+          );
+          const sessionsSnap = await getDocs(sessionsCol);
+          for (const sDoc of sessionsSnap.docs) {
+            const notesCol = collection(
+              db,
+              "orgs",
+              orgId,
+              "doctors",
+              user.uid,
+              "patients",
+              pDoc.id,
+              "sessions",
+              sDoc.id,
+              "notes"
+            );
+            const notesSnap = await getDocs(notesCol);
+            totalNotes += notesSnap.size;
+          }
+        }
+        if (!alive) return;
+        setNotesCount(totalNotes);
+      } catch (e) {
+        console.error("Error leyendo métricas:", e);
+        if (!alive) return;
+        setPatientsCount(0);
+        setNotesCount(0);
+      } finally {
+        if (alive) setLoadingStats(false);
+      }
+    }
+    loadStats();
+    return () => { alive = false; };
+  }, [user?.uid, orgId]);
+
+  const statPatients = useMemo(() => patientsCount ?? 0, [patientsCount]);
+  const statNotes = useMemo(() => notesCount ?? 0, [notesCount]);
 
   const handleLogout = async () => {
     try {
-      await logout(); // Firebase signOut via AuthContext
+      await logout();
       navigate("/login", { replace: true });
     } catch (e) {
       console.error("Logout failed:", e);
@@ -19,15 +109,21 @@ export default function MainDashboard() {
   return (
     <div className="flex h-screen flex-col bg-background-light dark:bg-background-dark font-display text-text-primary">
       {/* Header */}
-      <header className="flex h-16 w-full items-center justify-between bg-dark-navy px-6 text-white">
-        <div className="flex items-center gap-2">
+      <header className="flex h-16 w-full items-center justify-between bg-dark-navy px-4 sm:px-6 text-white">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setCollapsed((c) => !c)}
+            className="inline-flex items-center justify-center rounded hover:bg-white/10 p-1"
+            title={collapsed ? "Expandir" : "Contraer"}
+          >
+            <span className="material-symbols-outlined">menu</span>
+          </button>
           <span className="material-symbols-outlined text-white text-3xl">
             neurology
           </span>
-          <h1 className="text-xl font-bold">TerappIA</h1>
+          <h1 className="text-lg sm:text-xl font-bold">TerappIA</h1>
         </div>
 
-        {/* Exit / Logout */}
         <button
           onClick={handleLogout}
           className="text-sm font-medium hover:underline focus:outline-none"
@@ -37,84 +133,88 @@ export default function MainDashboard() {
         </button>
       </header>
 
-      {/* Main layout */}
-      <div className="flex flex-1">
-        {/* Sidebar */}
-        <aside className="flex w-64 flex-col bg-light-gray p-4">
-          <div className="mb-4 h-10 flex items-center justify-center bg-calm-blue rounded-md text-dark-navy font-semibold">
-            Barra rápida
-          </div>
-          <nav className="flex flex-col space-y-2">
-            {/* Perfil -> navega a /profile */}
-            <NavLink
-              to="/profile"
-              className="flex items-center gap-3 rounded-lg px-3 py-2 text-text-primary hover:bg-calm-blue"
-            >
-              <span className="material-symbols-outlined">build</span>
-              <span>Perfil</span>
-            </NavLink>
+      {/* Main */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* Reusable Sidebar */}
+        <AppSidebar collapsed={collapsed} onToggle={() => setCollapsed((c) => !c)} />
 
-            {/* Configuración (placeholder por ahora) */}
-            <button
-              type="button"
-              className="flex items-center gap-3 rounded-lg px-3 py-2 text-left text-text-primary hover:bg-calm-blue"
-              onClick={() => {
-                /* aquí puedes navegar cuando tengas la ruta, ej:
-                   navigate('/settings');
-                */
-              }}
-            >
-              <span className="material-symbols-outlined">settings</span>
-              <span>Configuración</span>
-            </button>
-          </nav>
-        </aside>
-
-        {/* Main content */}
-        <main className="flex-1 bg-white p-8">
-          <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
-            {/* Card 1 */}
-            <div className="flex flex-col items-center justify-center rounded-xl bg-calm-blue p-8 text-center shadow-subtle">
-              <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-white">
-                <span className="material-symbols-outlined text-4xl text-dark-navy">
-                  description
-                </span>
+        {/* Content */}
+        <main className="flex-1 overflow-y-auto">
+          {/* Doctor panel (sin correo) */}
+          <section className="p-6 sm:p-8">
+            <div className="rounded-xl bg-white dark:bg-[#0d121b] shadow-subtle p-6">
+              <div className="flex items-center gap-4">
+                <img
+                  src={photoURL}
+                  alt="Foto"
+                  className="h-14 w-14 rounded-full object-cover"
+                />
+                <div className="min-w-0">
+                  <h2 className="text-xl font-bold text-dark-navy dark:text-white truncate">
+                    {name}
+                  </h2>
+                  <p className="text-sm text-text-secondary dark:text-gray-300 truncate">
+                    {orgId ? `Org: ${orgId}` : "Sin organización"}
+                  </p>
+                </div>
               </div>
-              <h2 className="mb-2 text-2xl font-bold text-dark-navy">
-                Notas de evolución
-              </h2>
-              <p className="mb-6 text-text-secondary">
-                Genera y modifica notas de evolución.
-              </p>
-              <button
+
+              <div className="mt-6 grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="rounded-lg bg-calm-blue p-4">
+                  <div className="text-3xl font-extrabold text-dark-navy">
+                    {loadingStats ? "—" : statPatients}
+                  </div>
+                  <div className="text-sm text-text-secondary">Pacientes</div>
+                </div>
+                <div className="rounded-lg bg-calm-blue p-4">
+                  <div className="text-3xl font-extrabold text-dark-navy">
+                    {loadingStats ? "—" : statNotes}
+                  </div>
+                  <div className="text-sm text-text-secondary">Notas</div>
+                </div>
+                <div className="rounded-lg bg-calm-blue p-4">
+                  <div className="text-3xl font-extrabold text-dark-navy">
+                    {loadingStats ? "—" : Math.max(statNotes - 0, 0)}
+                  </div>
+                  <div className="text-sm text-text-secondary">Sesiones (aprox.)</div>
+                </div>
+                <div className="rounded-lg bg-calm-blue p-4">
+                  <div className="text-3xl font-extrabold text-dark-navy">—</div>
+                  <div className="text-sm text-text-secondary">Archivos sesión</div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* Action cards */}
+          <section className="px-6 sm:px-8 pb-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+              <Card
+                icon="add_notes"
+                title="Nueva nota"
+                desc="Inicia una nota de evolución por OCR o audio."
                 onClick={() => navigate("/generate-progress-note")}
-                className="flex min-w-[84px] cursor-pointer items-center justify-center rounded-lg bg-dark-navy px-5 py-3 text-base font-bold text-white shadow-md transition-colors duration-300 hover:bg-opacity-90"
-              >
-                Generar notas
-              </button>
+              />
+              <Card
+                icon="group"
+                title="Lista de pacientes"
+                desc="Consulta y gestiona tus pacientes."
+                onClick={() => navigate("/patient-list")}
+              />
+              <Card
+                icon="notes"
+                title="Lista de notas"
+                desc="Revisa tus notas guardadas y el análisis."
+                onClick={() => navigate("/notes")}
+              />
+              <Card
+                icon="folder_open"
+                title="Archivos de sesiones"
+                desc="(Próximamente) Explora imágenes y audios."
+                onClick={() => alert("Próximamente")}
+              />
             </div>
-
-            {/* Card 2 */}
-            <div className="flex flex-col items-center justify-center rounded-xl bg-calm-blue p-8 text-center shadow-subtle">
-              <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-white">
-                <span className="material-symbols-outlined text-4xl text-dark-navy">
-                  search
-                </span>
-              </div>
-              <h2 className="mb-2 text-2xl font-bold text-dark-navy">
-                Consultar notas
-              </h2>
-              <p className="mb-6 text-text-secondary">
-                Revisa y analiza notas previamente registradas.
-              </p>
-              <button
-                onClick={() => navigate("/patient-progress-note-overview")}
-                className="flex min-w-[84px] cursor-pointer items-center justify-center rounded-lg bg-dark-navy px-5 py-3 text-base font-bold text-white shadow-md transition-colors duration-300 hover:bg-opacity-90"
-              >
-                Consultar notas
-              </button>
-            </div>
-          </div>
+          </section>
         </main>
       </div>
 
@@ -124,45 +224,36 @@ export default function MainDashboard() {
           <p>contacto@terappia.com</p>
           <p>+1 (234) 567-890</p>
         </div>
-
         <div className="flex space-x-4">
-          {/* Twitter */}
-          <a href="#" className="text-white hover:text-gray-300">
-            <svg
-              className="h-6 w-6"
-              fill="currentColor"
-              viewBox="0 0 24 24"
-              xmlns="http://www.w3.org/2000/svg"
-            >
-              <path d="M22.46,6C21.69,6.35 20.86,6.58 20,6.69C20.88,6.16 21.56,5.32 21.88,4.31C21.05,4.81 20.13,5.16 19.16,5.36C18.37,4.5 17.26,4 16,4C13.65,4 11.73,5.92 11.73,8.29C11.73,8.63 11.77,8.96 11.84,9.28C8.28,9.09 5.11,7.38 3,4.79C2.63,5.42 2.42,6.16 2.42,6.94C2.42,8.43 3.17,9.75 4.33,10.5C3.62,10.48 2.96,10.29 2.38,10V10.03C2.38,12.11 3.86,13.85 5.82,14.24C5.46,14.34 5.08,14.39 4.69,14.39C4.42,14.39 4.15,14.36 3.89,14.31C4.43,16.03 6.02,17.25 7.89,17.29C6.43,18.45 4.58,19.13 2.56,19.13C2.22,19.13 1.88,19.11 1.54,19.07C3.44,20.29 5.7,21 8.12,21C16,21 20.33,14.46 20.33,8.79C20.33,8.56 20.33,8.34 20.32,8.12C21.17,7.5 21.88,6.81 22.46,6Z" />
-            </svg>
+          <a href="#" className="text-white hover:text-gray-300" aria-label="X/Twitter">
+            <span className="material-symbols-outlined">public</span>
           </a>
-
-          {/* Instagram */}
-          <a href="#" className="text-white hover:text-gray-300">
-            <svg
-              className="h-6 w-6"
-              fill="currentColor"
-              viewBox="0 0 24 24"
-              xmlns="http://www.w3.org/2000/svg"
-            >
-              <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.85s-.011 3.584-.069 4.85c-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07s-3.584-.012-4.85-.07c-3.252-.148-4.771-1.691-4.919-4.919-.058-1.265-.069-1.645-.069-4.85s.011-3.584.069-4.85c.149-3.225 1.664-4.771 4.919-4.919C8.416 2.175 8.796 2.163 12 2.163m0-2.163C8.74 0 8.333.012 7.053.072 2.695.272.273 2.69.073 7.052.012 8.333 0 8.74 0 12s.012 3.667.072 4.947c.2 4.358 2.618 6.78 6.98 6.98C8.333 23.988 8.74 24 12 24s3.667-.012 4.947-.072c4.358-.2 6.78-2.618 6.98-6.98.06-1.28.072-1.687.072-4.947s-.012-3.667-.072-4.947c-.2-4.358-2.618-6.78-6.98-6.98C15.667.012 15.26 0 12 0zm0 5.838a6.162 6.162 0 100 12.324 6.162 6.162 0 000-12.324zM12 16a4 4 0 110-8 4 4 0 010 8zm6.406-11.845a1.44 1.44 0 100 2.88 1.44 1.44 0 000-2.88z" />
-            </svg>
+          <a href="#" className="text-white hover:text-gray-300" aria-label="Instagram">
+            <span className="material-symbols-outlined">camera</span>
           </a>
-
-          {/* LinkedIn */}
-          <a href="#" className="text-white hover:text-gray-300">
-            <svg
-              className="h-6 w-6"
-              fill="currentColor"
-              viewBox="0 0 24 24"
-              xmlns="http://www.w3.org/2000/svg"
-            >
-              <path d="M19 0h-14c-2.761 0-5 2.239-5 5v14c0 2.761 2.239 5 5 5h14c2.762 0 5-2.239 5-5v-14c0-2.761-2.238-5-5-5zm-11 19h-3v-11h3v11zm-1.5-12.268c-.966 0-1.75-.79-1.75-1.764s.784-1.764 1.75-1.764 1.75.79 1.75 1.764-.783 1.764-1.75 1.764zm13.5 12.268h-3v-5.604c0-3.368-4-3.113-4 0v5.604h-3v-11h3v1.765c1.396-2.586 7-2.777 7 2.476v6.759z" />
-            </svg>
+          <a href="#" className="text-white hover:text-gray-300" aria-label="LinkedIn">
+            <span className="material-symbols-outlined">work</span>
           </a>
         </div>
       </footer>
+    </div>
+  );
+}
+
+function Card({ icon, title, desc, onClick }) {
+  return (
+    <div className="flex flex-col items-center justify-center rounded-xl bg-calm-blue p-6 text-center shadow-subtle">
+      <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-white">
+        <span className="material-symbols-outlined text-3xl text-dark-navy">{icon}</span>
+      </div>
+      <h3 className="mb-1 text-lg font-bold text-dark-navy">{title}</h3>
+      <p className="mb-4 text-text-secondary text-sm">{desc}</p>
+      <button
+        onClick={onClick}
+        className="flex min-w-[84px] items-center justify-center rounded-lg bg-dark-navy px-4 py-2 text-white font-semibold"
+      >
+        Abrir
+      </button>
     </div>
   );
 }
