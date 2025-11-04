@@ -5,6 +5,7 @@ import { useAuth } from "../context/AuthContext";
 import { db } from "../services/firebaseConfig";
 import { doc, getDoc } from "firebase/firestore";
 import AppSidebar from "../components/AppSidebar";
+import { BASE } from "../services/orchestrator";
 
 // Fallback desde sessionStorage cuando no llega por state
 function readSessionCtx() {
@@ -37,6 +38,7 @@ export default function PatientProgressNoteOverview() {
   const [note, setNote] = useState(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
+  const [saving, setSaving] = useState(false);
 
   // Nota de evolución (la redacta el médico)
   const [evolutionNote, setEvolutionNote] = useState("");
@@ -185,19 +187,61 @@ export default function PatientProgressNoteOverview() {
     try { await logout(); navigate("/login", { replace: true }); } catch {}
   };
 
-  async function handleGenerateNote() {
+async function handleGenerateNote() {
+    // 1. Recopilar el payload (esto ya lo tenías)
     const payload = {
       org_id: orgId,
-      doctor_uid: user?.uid,
       patient_id: patientId,
       session_id: sessionId,
-      note_id: noteId,          // puede ser null por ahora
-      evolution_note: evolutionNote,
-      baseline_text: extractedText,
-      analysis: analysisRaw,
+      note_id: noteId,
+      evolution_note: evolutionNote, // La nota del doctor
+      baseline_text: extractedText,   // El texto de OCR/Audio
+      analysis: analysisRaw,          // El JSON de análisis
     };
-    console.log("[GENERAR NOTA] payload:", payload);
-    alert("Generar nota: aún sin endpoint. Payload en consola.");
+
+    setSaving(true);
+    try {
+      // 2. Obtener token de Firebase
+      const idToken = await user.getIdToken(true);
+
+      // 3. Llamar al endpoint del orquestador
+      const res = await fetch(`${BASE}/generar_reporte_pdf`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${idToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        // Si falla, intentar leer el error como JSON
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err?.detail || res.statusText);
+      }
+
+      // 4. Manejar la respuesta (el PDF)
+      // La respuesta no es JSON, es el archivo binario (blob)
+      const blob = await res.blob();
+
+      // 5. Crear un enlace temporal para descargar el archivo
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `Nota_${noteId || sessionId}.pdf`; // Nombre del archivo
+      document.body.appendChild(a);
+      a.click(); // Simular clic para descargar
+      
+      // 6. Limpiar
+      window.URL.revokeObjectURL(url);
+      a.remove();
+
+    } catch (e) {
+      console.error("Error generando PDF:", e);
+      alert(`Error generando PDF: ${e.message}`);
+    } finally {
+      setSaving(false);
+    }
   }
 
   if (loading) return <div className="p-8">Cargando…</div>;
@@ -346,9 +390,10 @@ export default function PatientProgressNoteOverview() {
               <div className="mt-3 flex justify-end">
                 <button
                   onClick={handleGenerateNote}
-                  className="px-5 py-2 rounded-lg bg-green-600 text-white font-semibold"
+                  disabled={saving}
+                  className="px-5 py-2 rounded-lg bg-green-600 text-white font-semibold disabled:opacity-50"
                 >
-                  Generar nota
+                  {saving ? "Generando..." : "Generar nota"}
                 </button>
               </div>
             </div>

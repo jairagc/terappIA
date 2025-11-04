@@ -11,7 +11,7 @@ const BASE_PROD = import.meta.env.VITE_ORCH_URL_PROD || "https://orchestrator-82
 const RAW_BASE = DEV ? BASE_DEV : BASE_PROD;
 
 // Normaliza slashes para evitar dobles //
-const BASE = RAW_BASE.replace(/\/+$/, "");
+export const BASE = RAW_BASE.replace(/\/+$/, "");
 
 function postMultipartXHR({ endpoint, formData, idToken, onProgress }) {
   return new Promise((resolve, reject) => {

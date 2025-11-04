@@ -12,6 +12,9 @@ from firebase_admin import credentials, auth
 from google.cloud import firestore
 from starlette.responses import PlainTextResponse
 from fastapi import Request
+from fpdf import FPDF
+from fastapi.responses import StreamingResponse
+import io
 # ──────────────────────────────────────────────────────────────────────────────
 # Firebase Admin init (seguro para Cloud Run: sin JSON si no existe)
 def _init_firebase_admin_once():
@@ -108,6 +111,15 @@ class GuardarNotaOut(BaseModel):
     mensaje: str
     note_id: str
     analisis: Dict[str, Any]
+
+class GenerarReporteIn(BaseModel):
+    org_id: str
+    patient_id: str
+    session_id: str
+    note_id: str
+    evolution_note: str  # Nota del doctor
+    baseline_text: str   # Texto de OCR/Audio
+    analysis: Optional[Dict[str, Any]] = None # JSON de emociones
 # ──────────────────────────────────────────────────────────────────────────────
 async def _save_note_to_firestore(
     db_client,
@@ -171,6 +183,107 @@ def build_forward_headers(authorization: Optional[str], uid: Optional[str]) -> D
         headers["X-User-Id"] = uid                # tu micro la usa como doctor_uid
     return headers
 
+@app.post("/generar_reporte_pdf")
+async def generar_reporte_pdf(
+    payload: GenerarReporteIn,
+    current_user: dict = Depends(get_current_user),
+):
+    doctor_uid = current_user.get("uid")
+    
+    try:
+        # --- Fase 1: Obtener Datos (Dejamos esto activo) ---
+        print("DEBUG: Obteniendo datos de Firestore...")
+        doc_ref = db.collection("orgs").document(payload.org_id) \
+                    .collection("doctors").document(doctor_uid)
+        doc_snap = doc_ref.get()
+        doctor_data = doc_snap.to_dict() if doc_snap.exists else {}
+
+        pat_ref = db.collection("orgs").document(payload.org_id) \
+                    .collection("doctors").document(doctor_uid) \
+                    .collection("patients").document(payload.patient_id)
+        pat_snap = pat_ref.get()
+        patient_data = pat_snap.to_dict() if pat_snap.exists else {}
+        print("DEBUG: Datos de Firestore obtenidos.")
+
+        # --- Fase 2: Inicializar PDF (Dejamos esto activo) ---
+        print("DEBUG: Inicializando FPDF y cargando fuentes...")
+        pdf = FPDF()
+        
+        try:
+            pdf.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
+            pdf.add_font("DejaVu", "B", "DejaVuSans-Bold.ttf", uni=True)
+            pdf.add_page()
+            pdf.set_font("DejaVu", size=16)
+        except Exception as e:
+            print(f"ADVERTENCIA: No se pudo cargar la fuente DejaVu: {e}")
+            pdf.add_page()
+            pdf.set_font("Arial", size=16)
+        
+        print("DEBUG: PDF inicializado.")
+
+        print("DEBUG: Añadiendo Título y Datos...")
+        # Título
+        pdf.cell(200, 10, txt="Reporte de Nota de Evolución", ln=True, align="C")
+        pdf.set_font("DejaVu", size=12) 
+
+        # Datos del Doctor
+        pdf.cell(200, 10, txt=f"Doctor: {str(doctor_data.get('name', 'N/A'))}", ln=True)
+        pdf.cell(200, 10, txt=f"Cédula: {str(doctor_data.get('cedula', 'N/A'))}", ln=True)
+        pdf.cell(200, 10, txt=f"Organización: {str(payload.org_id)}", ln=True)
+        
+        # Datos del Paciente
+        pdf.cell(200, 10, txt=f"Paciente: {str(patient_data.get('fullName', 'N/A'))}", ln=True)
+        pdf.cell(200, 10, txt=f"Edad: {str(patient_data.get('age', 'N/A'))}", ln=True)
+        pdf.cell(200, 10, txt=f"Sesión ID: {str(payload.session_id)}", ln=True)
+        pdf.ln(10) # Salto de línea
+        print("DEBUG: Título y Datos añadidos.")
+
+        print("DEBUG: Añadiendo Nota del Médico...")
+        # Nota del Médico
+        pdf.set_font("DejaVu", 'B', size=14)
+        pdf.cell(200, 10, txt="Nota de Evolución (Médico)", ln=True)
+        pdf.set_font("DejaVu", size=12)
+        pdf.multi_cell(0, 5, txt=str(payload.evolution_note))
+        pdf.ln(10)
+        print("DEBUG: Nota del Médico añadida.")
+
+        print("DEBUG: Añadiendo Análisis de Emociones...")
+        # Análisis de Emociones
+        pdf.set_font("DejaVu", 'B', size=14)
+        pdf.cell(200, 10, txt="Análisis de Emociones", ln=True)
+        pdf.set_font("DejaVu", size=12)
+        if payload.analysis and payload.analysis.get('resultado'):
+            for emocion, data in payload.analysis['resultado'].items():
+                ents = ", ".join(data.get('entidades', []))
+                pdf.multi_cell(0, 5, txt=f"- {str(emocion).capitalize()}: {str(data.get('porcentaje', 0))}% (Entidades: {ents or 'N/A'})")
+        else:
+            pdf.multi_cell(0, 5, txt="No se realizó análisis.")
+        pdf.ln(10)
+        print("DEBUG: Análisis añadido.")
+
+        print("DEBUG: Añadiendo Texto de Referencia...")
+        # Texto de Referencia
+        pdf.set_font("DejaVu", 'B', size=14) 
+        pdf.cell(200, 10, txt="Texto de Referencia (Extraído)", ln=True)
+        pdf.set_font("DejaVu", '', size=10) 
+        pdf.multi_cell(0, 5, txt=str(payload.baseline_text or "N/A"))
+        print("DEBUG: Texto de Referencia añadido.")
+
+        print("DEBUG: Generando bytes del PDF...")
+        pdf_string = pdf.output(dest='S')
+        pdf_bytes = pdf_string.encode('latin-1')
+        
+        print("DEBUG: Enviando StreamingResponse...")
+        return StreamingResponse(
+            io.BytesIO(pdf_bytes),
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"attachment; filename=Nota_{payload.note_id}.pdf"}
+        )
+
+    except Exception as e:
+        # Esto capturará cualquier error (como el 'bytes-like')
+        print(f"ERROR DETALLADO: {e}")
+        raise HTTPException(status_code=500, detail=f"Error generando PDF: {e}")
 # ──────────────────────────────────────────────────────────────────────────────
 @app.get("/health")
 def health():
