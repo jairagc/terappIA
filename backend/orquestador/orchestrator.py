@@ -2,7 +2,7 @@ import os
 import uuid
 from datetime import datetime
 from typing import Any, Dict, Optional
-
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI, File, UploadFile, HTTPException, Header, Form, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
@@ -10,7 +10,8 @@ import httpx
 import firebase_admin
 from firebase_admin import credentials, auth
 from google.cloud import firestore
-
+from starlette.responses import PlainTextResponse
+from fastapi import Request
 # ──────────────────────────────────────────────────────────────────────────────
 # Firebase Admin init (seguro para Cloud Run: sin JSON si no existe)
 def _init_firebase_admin_once():
@@ -66,15 +67,22 @@ READ_TIMEOUT    = float(os.getenv("ORC_READ_TIMEOUT", "120"))
 
 # ──────────────────────────────────────────────────────────────────────────────
 app = FastAPI(title="Orquestador (Foto→OCR→Análisis | Audio→Transcripción→Análisis)")
-FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "http://localhost:5173")
-from fastapi.middleware.cors import CORSMiddleware
+# Definición de las URLs que serán aceptadas
+FRONTEND_ORIGIN = [
+    "https://frontend-826777844588.us-central1.run.app",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[FRONTEND_ORIGIN],   # o ["*"] mientras pruebas
-    allow_credentials=True,
-    allow_methods=["POST", "OPTIONS"], # incluye OPTIONS para preflight
-    allow_headers=["*"],               # o explícito: ["Authorization","Content-Type"]
+    allow_origins=FRONTEND_ORIGIN,            # prod exacto
+    allow_origin_regex=r"https?://localhost(:\d+)?$",  # dev: cualquier puerto
+    allow_credentials=True,                   # ok si usas cookies; con Bearer no molesta
+    allow_methods=["*"],                      # evita sorpresas
+    allow_headers=["*"],                      # idem
+    expose_headers=["*"],
+    max_age=600,
 )
+
 class OrquestacionFotoRespuesta(BaseModel):
     mensaje: str
     user_id: Optional[str]
@@ -167,6 +175,11 @@ def build_forward_headers(authorization: Optional[str], uid: Optional[str]) -> D
 @app.get("/health")
 def health():
     return {"ok": True, "ts": _timestamp()}
+
+@app.options("/{full_path:path}")
+async def preflight_catch_all(full_path: str, request: Request):
+    # 204 sin validar nada; CORSMiddleware inyecta los headers CORS
+    return PlainTextResponse("", status_code=204)
 
 # FOTO → OCR → ANÁLISIS
 @app.post("/orquestar_foto", response_model=OrquestacionFotoRespuesta)
