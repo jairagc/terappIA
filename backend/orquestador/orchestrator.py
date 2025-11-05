@@ -1,33 +1,38 @@
 import os
+import re
+import textwrap
 import uuid
 from datetime import datetime
 from typing import Any, Dict, Optional
+from pathlib import Path
+import io
+
+from fastapi import FastAPI, File, UploadFile, HTTPException, Header, Form, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi import FastAPI, File, UploadFile, HTTPException, Header, Form, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import httpx
+
 import firebase_admin
 from firebase_admin import credentials, auth
 from google.cloud import firestore
 from starlette.responses import PlainTextResponse
-from fastapi import Request
+
 from fpdf import FPDF
-from fastapi.responses import StreamingResponse
-import io
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Firebase Admin init (seguro para Cloud Run: sin JSON si no existe)
 def _init_firebase_admin_once():
     try:
         firebase_admin.get_app()
     except ValueError:
-        # 1) Si existe serviceAccountKey.json, úsalo. 2) Si no, ADC (SA de Cloud Run)
         path = "serviceAccountKey.json"
         if os.path.exists(path):
             cred = credentials.Certificate(path)
             firebase_admin.initialize_app(cred)
         else:
-            firebase_admin.initialize_app()  # ADC (Workload Identity/SA de Cloud Run)
+            firebase_admin.initialize_app()  # ADC (Workload Identity / SA de Cloud Run)
 
 _init_firebase_admin_once()
 
@@ -41,7 +46,7 @@ async def get_current_user(cred: HTTPAuthorizationCredentials = Depends(security
         raise HTTPException(status_code=401, detail="Falta el token de autorización")
     try:
         token = cred.credentials
-        decoded = auth.verify_id_token(token)  # Verificación online/offline automática
+        decoded = auth.verify_id_token(token)
         return decoded  # incluye 'uid', 'email', etc.
     except Exception as e:
         raise HTTPException(status_code=401, detail=f"Token inválido: {e}")
@@ -69,23 +74,69 @@ CONNECT_TIMEOUT = float(os.getenv("ORC_CONNECT_TIMEOUT", "10"))
 READ_TIMEOUT    = float(os.getenv("ORC_READ_TIMEOUT", "120"))
 
 # ──────────────────────────────────────────────────────────────────────────────
-app = FastAPI(title="Orquestador (Foto→OCR→Análisis | Audio→Transcripción→Análisis)")
-# Definición de las URLs que serán aceptadas
-FRONTEND_ORIGIN = [
-    "https://frontend-826777844588.us-central1.run.app",
+# Fuentes DejaVu (Docker + local dev)
+DEJAVU_REGULAR_CANDIDATES = [
+    "/usr/local/share/fonts/truetype/app/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/app/DejaVuSans.ttf",
+    "DejaVuSans.ttf",
 ]
+DEJAVU_BOLD_CANDIDATES = [
+    "/usr/local/share/fonts/truetype/app/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/app/DejaVuSans-Bold.ttf",
+    "DejaVuSans-Bold.ttf",
+]
+
+def _first_existing_path(candidates) -> Optional[str]:
+    for p in candidates:
+        if Path(p).exists():
+            return p
+    return None
+
+def register_dejavu(pdf: FPDF) -> bool:
+    """Registra DejaVu en FPDF si las TTF están disponibles. Devuelve True si se registró."""
+    reg = _first_existing_path(DEJAVU_REGULAR_CANDIDATES)
+    bold = _first_existing_path(DEJAVU_BOLD_CANDIDATES)
+    if not reg or not bold:
+        print(f"[WARN] Fuentes DejaVu no encontradas. regular={reg} bold={bold}")
+        return False
+    try:
+        pdf.add_font("DejaVu", "", reg, uni=True)
+        pdf.add_font("DejaVu", "B", bold, uni=True)
+        print(f"[INFO] DejaVu registrado: regular={reg}, bold={bold}")
+        return True
+    except Exception as e:
+        print(f"[WARN] Falló el registro de DejaVu: {e}")
+        return False
+
+# Cortar secuencias sin espacios (URLs, tokens, base64) para que quepan en multi_cell
+def soften_unbreakables(s: str, chunk: int = 60) -> str:
+    if not s:
+        return ""
+    return re.sub(
+        r"(\S{" + str(chunk) + r",})",
+        lambda m: "\n".join(textwrap.wrap(m.group(1), chunk)),
+        s,
+    )
+
+# ──────────────────────────────────────────────────────────────────────────────
+app = FastAPI(title="Orquestador (Foto→OCR→Análisis | Audio→Transcripción→Análisis)")
+FRONTEND_ORIGIN = ["https://frontend-826777844588.us-central1.run.app"]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=FRONTEND_ORIGIN,            # prod exacto
-    allow_origin_regex=r"https?://localhost(:\d+)?$",  # dev: cualquier puerto
-    allow_credentials=True,                   # ok si usas cookies; con Bearer no molesta
-    allow_methods=["*"],                      # evita sorpresas
-    allow_headers=["*"],                      # idem
+    allow_origins=FRONTEND_ORIGIN,
+    allow_origin_regex=r"https?://localhost(:\d+)?$",
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
     expose_headers=["*"],
     max_age=600,
 )
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Schemas
 class OrquestacionFotoRespuesta(BaseModel):
     mensaje: str
     user_id: Optional[str]
@@ -119,7 +170,8 @@ class GenerarReporteIn(BaseModel):
     note_id: str
     evolution_note: str  # Nota del doctor
     baseline_text: str   # Texto de OCR/Audio
-    analysis: Optional[Dict[str, Any]] = None # JSON de emociones
+    analysis: Optional[Dict[str, Any]] = None  # JSON de emociones
+
 # ──────────────────────────────────────────────────────────────────────────────
 async def _save_note_to_firestore(
     db_client,
@@ -128,19 +180,14 @@ async def _save_note_to_firestore(
     patient_id: str,
     session_id: str,
     note_id: str,
-    note_type: str,       # "image" | "audio"
-    source_type: str,     # "upload" | "gcs_uri"
+    note_type: str,       # "image" | "audio" | "text"
+    source_type: str,     # "upload" | "gcs_uri" | "final"
     source_gcs_uri: Optional[str],
     text_content: str,
     analysis_result: dict,
 ):
-    """
-    Guarda un documento 'note' en Firestore si está disponible.
-    Si Firestore no está disponible, no hace nada (no falla la request).
-    """
     if not db_client:
-        return  # Silently skip if Firestore is not configured
-
+        return
     try:
         note_ref = (
             db_client.collection("orgs").document(org_id)
@@ -149,27 +196,22 @@ async def _save_note_to_firestore(
             .collection("sessions").document(session_id)
             .collection("notes").document(note_id)
         )
-
         note_data = {
             "note_id": note_id,
-            "type": note_type,                # "image" o "audio"
-            "source": source_type,            # "upload" o "gcs_uri"
-            "gcs_uri_source": source_gcs_uri, # Enlace al archivo original (si aplica)
-            "ocr_text": text_content,         # o transcripción para audio
-            "emotions": analysis_result.get("resultado", {}),
+            "type": note_type,
+            "source": source_type,
+            "gcs_uri_source": source_gcs_uri,
+            "ocr_text": text_content,
+            "emotions": (analysis_result or {}).get("resultado", {}),
             "status_pipeline": "done",
         }
-
-        # Timestamps del servidor (si Firestore disponible)
         try:
             note_data["created_at"] = firestore.SERVER_TIMESTAMP  # type: ignore
             note_data["processed_at"] = firestore.SERVER_TIMESTAMP  # type: ignore
         except Exception:
             pass
-
         note_ref.set(note_data)
     except Exception as e:
-        # No detiene la request principal; puedes cambiar a raise si quieres endurecer.
         print(f"[WARN] Firestore write failed for note {note_id}: {e}")
 
 def _timestamp() -> str:
@@ -178,20 +220,21 @@ def _timestamp() -> str:
 def build_forward_headers(authorization: Optional[str], uid: Optional[str]) -> Dict[str, str]:
     headers: Dict[str, str] = {}
     if authorization:
-        headers["Authorization"] = authorization   # forward del ID token
+        headers["Authorization"] = authorization
     if uid:
-        headers["X-User-Id"] = uid                # tu micro la usa como doctor_uid
+        headers["X-User-Id"] = uid
     return headers
 
+# ──────────────────────────────────────────────────────────────────────────────
 @app.post("/generar_reporte_pdf")
 async def generar_reporte_pdf(
     payload: GenerarReporteIn,
     current_user: dict = Depends(get_current_user),
 ):
     doctor_uid = current_user.get("uid")
-    
+
     try:
-        # --- Fase 1: Obtener Datos (Dejamos esto activo) ---
+        # --- Fase 1: Firestore ---
         print("DEBUG: Obteniendo datos de Firestore...")
         doc_ref = db.collection("orgs").document(payload.org_id) \
                     .collection("doctors").document(doctor_uid)
@@ -205,75 +248,93 @@ async def generar_reporte_pdf(
         patient_data = pat_snap.to_dict() if pat_snap.exists else {}
         print("DEBUG: Datos de Firestore obtenidos.")
 
-        # --- Fase 2: Inicializar PDF (Dejamos esto activo) ---
-        print("DEBUG: Inicializando FPDF y cargando fuentes...")
+        # --- Fase 2: PDF ---
+        print("DEBUG: Inicializando FPDF y fuentes...")
         pdf = FPDF()
-        
-        try:
-            pdf.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
-            pdf.add_font("DejaVu", "B", "DejaVuSans-Bold.ttf", uni=True)
-            pdf.add_page()
+        pdf.set_auto_page_break(auto=True, margin=15)  # evita desbordes verticales
+        fonts_ok = register_dejavu(pdf)
+
+        pdf.add_page()
+        if fonts_ok:
             pdf.set_font("DejaVu", size=16)
-        except Exception as e:
-            print(f"ADVERTENCIA: No se pudo cargar la fuente DejaVu: {e}")
-            pdf.add_page()
+        else:
             pdf.set_font("Arial", size=16)
-        
-        print("DEBUG: PDF inicializado.")
 
-        print("DEBUG: Añadiendo Título y Datos...")
         # Título
-        pdf.cell(200, 10, txt="Reporte de Nota de Evolución", ln=True, align="C")
-        pdf.set_font("DejaVu", size=12) 
+        pdf.cell(0, 10, txt="Reporte de Nota de Evolución", ln=True, align="C")
 
-        # Datos del Doctor
-        pdf.cell(200, 10, txt=f"Doctor: {str(doctor_data.get('name', 'N/A'))}", ln=True)
-        pdf.cell(200, 10, txt=f"Cédula: {str(doctor_data.get('cedula', 'N/A'))}", ln=True)
-        pdf.cell(200, 10, txt=f"Organización: {str(payload.org_id)}", ln=True)
-        
-        # Datos del Paciente
-        pdf.cell(200, 10, txt=f"Paciente: {str(patient_data.get('fullName', 'N/A'))}", ln=True)
-        pdf.cell(200, 10, txt=f"Edad: {str(patient_data.get('age', 'N/A'))}", ln=True)
-        pdf.cell(200, 10, txt=f"Sesión ID: {str(payload.session_id)}", ln=True)
-        pdf.ln(10) # Salto de línea
-        print("DEBUG: Título y Datos añadidos.")
+        if fonts_ok:
+            pdf.set_font("DejaVu", size=12)
+        else:
+            pdf.set_font("Arial", size=12)
 
-        print("DEBUG: Añadiendo Nota del Médico...")
-        # Nota del Médico
-        pdf.set_font("DejaVu", 'B', size=14)
-        pdf.cell(200, 10, txt="Nota de Evolución (Médico)", ln=True)
-        pdf.set_font("DejaVu", size=12)
-        pdf.multi_cell(0, 5, txt=str(payload.evolution_note))
-        pdf.ln(10)
-        print("DEBUG: Nota del Médico añadida.")
+        # Datos del Doctor (usar ancho 0 = ancho restante de línea)
+        pdf.cell(0, 10, txt=f"Doctor: {str(doctor_data.get('name', 'N/A'))}", ln=True)
+        pdf.cell(0, 10, txt=f"Cédula: {str(doctor_data.get('cedula', 'N/A'))}", ln=True)
+        pdf.cell(0, 10, txt=f"Organización: {str(payload.org_id)}", ln=True)
 
-        print("DEBUG: Añadiendo Análisis de Emociones...")
-        # Análisis de Emociones
-        pdf.set_font("DejaVu", 'B', size=14)
-        pdf.cell(200, 10, txt="Análisis de Emociones", ln=True)
-        pdf.set_font("DejaVu", size=12)
+        # Paciente
+        pdf.cell(0, 10, txt=f"Paciente: {str(patient_data.get('fullName', 'N/A'))}", ln=True)
+        pdf.cell(0, 10, txt=f"Edad: {str(patient_data.get('age', 'N/A'))}", ln=True)
+        pdf.cell(0, 10, txt=f"Sesión ID: {str(payload.session_id)}", ln=True)
+        pdf.ln(5)
+
+        # Nota del médico
+        if fonts_ok:
+            pdf.set_font("DejaVu", "B", size=14)
+        else:
+            pdf.set_font("Arial", "B", size=14)
+        pdf.cell(0, 10, txt="Nota de Evolución (Médico)", ln=True)
+
+        if fonts_ok:
+            pdf.set_font("DejaVu", size=12)
+        else:
+            pdf.set_font("Arial", size=12)
+
+        note_txt = soften_unbreakables(str(payload.evolution_note))
+        pdf.multi_cell(0, 5, txt=note_txt)
+        pdf.ln(3)
+
+        # Análisis
+        if fonts_ok:
+            pdf.set_font("DejaVu", "B", size=14)
+        else:
+            pdf.set_font("Arial", "B", size=14)
+        pdf.cell(0, 10, txt="Análisis de Emociones", ln=True)
+
+        if fonts_ok:
+            pdf.set_font("DejaVu", size=12)
+        else:
+            pdf.set_font("Arial", size=12)
+
         if payload.analysis and payload.analysis.get('resultado'):
             for emocion, data in payload.analysis['resultado'].items():
                 ents = ", ".join(data.get('entidades', []))
-                pdf.multi_cell(0, 5, txt=f"- {str(emocion).capitalize()}: {str(data.get('porcentaje', 0))}% (Entidades: {ents or 'N/A'})")
+                line = f"- {str(emocion).capitalize()}: {str(data.get('porcentaje', 0))}% (Entidades: {ents or 'N/A'})"
+                pdf.multi_cell(0, 5, txt=soften_unbreakables(line))
         else:
             pdf.multi_cell(0, 5, txt="No se realizó análisis.")
-        pdf.ln(10)
-        print("DEBUG: Análisis añadido.")
+        pdf.ln(3)
 
-        print("DEBUG: Añadiendo Texto de Referencia...")
-        # Texto de Referencia
-        pdf.set_font("DejaVu", 'B', size=14) 
-        pdf.cell(200, 10, txt="Texto de Referencia (Extraído)", ln=True)
-        pdf.set_font("DejaVu", '', size=10) 
-        pdf.multi_cell(0, 5, txt=str(payload.baseline_text or "N/A"))
-        print("DEBUG: Texto de Referencia añadido.")
+        # Texto de referencia (OCR/Audio)
+        if fonts_ok:
+            pdf.set_font("DejaVu", "B", size=14)
+        else:
+            pdf.set_font("Arial", "B", size=14)
+        pdf.cell(0, 10, txt="Texto de Referencia (Extraído)", ln=True)
 
-        print("DEBUG: Generando bytes del PDF...")
-        pdf_string = pdf.output(dest='S')
-        pdf_bytes = pdf_string.encode('latin-1')
-        
-        print("DEBUG: Enviando StreamingResponse...")
+        if fonts_ok:
+            pdf.set_font("DejaVu", "", size=10)
+        else:
+            pdf.set_font("Arial", "", size=10)
+
+        base_txt = soften_unbreakables(str(payload.baseline_text or "N/A"))
+        pdf.multi_cell(0, 5, txt=base_txt)
+
+        # Salida
+        pdf_string = pdf.output(dest='S')  # str (latin-1)
+        pdf_bytes = pdf_string.encode('latin-1', errors='ignore')
+
         return StreamingResponse(
             io.BytesIO(pdf_bytes),
             media_type="application/pdf",
@@ -281,9 +342,9 @@ async def generar_reporte_pdf(
         )
 
     except Exception as e:
-        # Esto capturará cualquier error (como el 'bytes-like')
         print(f"ERROR DETALLADO: {e}")
         raise HTTPException(status_code=500, detail=f"Error generando PDF: {e}")
+
 # ──────────────────────────────────────────────────────────────────────────────
 @app.get("/health")
 def health():
@@ -302,7 +363,7 @@ async def orquestar_foto(
     patient_id: str = Form(...),
     session_id: str = Form(...),
     org_id: str = Form(...),
-    analyze_now: bool = Form(default=False),              # <- NUEVO
+    analyze_now: bool = Form(default=False),
     current_user: dict = Depends(get_current_user),
     authorization: Optional[str] = Header(default=None, alias="Authorization"),
 ):
@@ -344,7 +405,7 @@ async def orquestar_foto(
                 raise HTTPException(status_code=an_resp.status_code, detail=f"Análisis error: {an_resp.text}")
             analysis_json = an_resp.json()
 
-        # Solo persistimos si ya analizamos (confirmación humana vendrá después si no)
+        # Persistimos si ya analizamos
         if analysis_json:
             source_gcs_uri = ocr_json.get("imagen_gcs") if file else gcs_uri
             await _save_note_to_firestore(
@@ -377,7 +438,7 @@ async def orquestar_audio(
     patient_id: str = Form(...),
     session_id: str = Form(...),
     org_id: str = Form(...),
-    analyze_now: bool = Form(default=False),              # <- NUEVO
+    analyze_now: bool = Form(default=False),
     current_user: dict = Depends(get_current_user),
     authorization: Optional[str] = Header(default=None, alias="Authorization"),
 ):
