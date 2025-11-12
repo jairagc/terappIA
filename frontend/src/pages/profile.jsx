@@ -1,17 +1,65 @@
 // src/pages/Profile.jsx
 import React, { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { db } from "../services/firebaseConfig";
 import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 
+import AppLayout from "../components/AppLayout";
 import AppSidebar from "../components/AppSidebar";
+import LoadingOverlay from "../components/LoadingOverlay";
 import { useDoctorProfile } from "../services/userDoctorProfile";
 
+/* =========================
+   MiniToast – éxito 40x30
+   ========================= */
+const MiniToast = ({ message, onClose }) => {
+  useEffect(() => {
+    const t = setTimeout(onClose, 3000); // auto-cierra en 3s
+    return () => clearTimeout(t);
+  }, [onClose]);
+
+  return (
+    <div
+      className="mini-toast"
+      role="status"
+      aria-live="polite"
+      title={message}
+      aria-label={message}
+    >
+      <span className="material-symbols-outlined">check_circle</span>
+    </div>
+  );
+};
+
+/* (Opcional) Modal de celebración grande que ya tenías */
+const ConfettiAlert = ({ message, onClose }) => (
+  <div className="confetti-alert-overlay" onClick={onClose}>
+    <div className="confetti-alert-card card">
+      <h2 className="section-title">🎉 ¡Éxito! 🎉</h2>
+      <p className="mt-2 text-center">{message}</p>
+      <button onClick={onClose} className="btn primary mt-4 h-10">
+        Entendido
+      </button>
+    </div>
+  </div>
+);
+
 export default function Profile() {
-  const { user, loading } = useAuth();
+  const { user, loading, logout } = useAuth();
+  const navigate = useNavigate();
   const uid = user?.uid || null;
 
-  // Perfil leído (para prefill org y nombre si ya existen)
+  const handleLogout = async () => {
+    try {
+      await logout();
+      navigate("/login", { replace: true });
+    } catch (e) {
+      console.error("Error al cerrar sesión:", e);
+    }
+  };
+
+  // Perfil leído (org preferente desde Firestore)
   const { orgId: orgFromProfile } = useDoctorProfile(
     user?.uid,
     user?.displayName,
@@ -20,41 +68,47 @@ export default function Profile() {
   );
 
   // UI
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true); // inicia oculto
   const [ready, setReady] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [busyMsg, setBusyMsg] = useState("");
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
+  const [isProfileLoaded, setIsProfileLoaded] = useState(false);
+
+  // Éxito (mini-toast y/o confetti)
+  const [showToast, setShowToast] = useState(false);
+  const [toastMsg, setToastMsg] = useState("");
+  const [showConfetti, setShowConfetti] = useState(false);
 
   // Campos del form
   const [orgId, setOrgId] = useState("");
   const [firstNames, setFirstNames] = useState(""); // Nombres
-  const [lastNameFather, setLastNameFather] = useState(""); // Apellido paterno
-  const [lastNameMother, setLastNameMother] = useState(""); // Apellido materno
+  const [lastNameFather, setLastNameFather] = useState(""); // Ap. paterno
+  const [lastNameMother, setLastNameMother] = useState(""); // Ap. materno
   const [phone, setPhone] = useState("");
   const [role, setRole] = useState("");
   const [cedula, setCedula] = useState("");
 
-  // Nombre inicial de referencia (si no hay perfil guardado aún)
+  // Nombre inicial de referencia
   const initialDisplay = useMemo(() => user?.displayName || "", [user?.displayName]);
 
-  // Carga inicial: org desde perfil o localStorage, y prefill básico
+  // Prefill org/nombre y ready
   useEffect(() => {
     const cachedOrg = localStorage.getItem("orgId") || "";
     setOrgId(orgFromProfile || cachedOrg);
-
-    // Si el displayName trae “Nombre Apellido…”, deja sólo en Nombres para no asumir apellidos
     if (initialDisplay && !firstNames) setFirstNames(initialDisplay);
-
     setReady(true);
-  }, [orgFromProfile, initialDisplay]); // eslint-disable-line
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orgFromProfile, initialDisplay]);
 
-  // Cuando ya hay uid+org, carga perfil desde Firestore
+  // Cargar perfil desde Firestore cuando haya uid+org
   useEffect(() => {
     let alive = true;
     (async () => {
       if (!uid || !orgId) return;
       try {
+        setBusyMsg("Cargando perfil…");
         const ref = doc(db, "orgs", orgId, "doctors", uid);
         const snap = await getDoc(ref);
         if (!alive) return;
@@ -68,24 +122,31 @@ export default function Profile() {
           setRole(d?.role ?? "");
           setCedula(d?.cedula ?? "");
           setMsg("Perfil cargado.");
+          setIsProfileLoaded(true);
         } else {
-          setMsg("No había perfil en Firestore. Captura tus datos y guarda.");
+          setMsg("Aún no tienes un perfil. Captura tus datos y guarda.");
+          setIsProfileLoaded(false);
         }
       } catch (e) {
         console.error("Error al cargar perfil:", e);
         setErr("No se pudo cargar tu perfil. Revisa la consola.");
+      } finally {
+        setBusyMsg("");
       }
     })();
     return () => {
       alive = false;
     };
-  }, [uid, orgId]); // eslint-disable-line
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uid, orgId]);
 
   // Validaciones
   const cleanDigits = (s) => (s || "").replace(/\D+/g, "");
-  const isPhoneValid = phone && cleanDigits(phone).length === 10; // 10 dígitos MX
+  const isPhoneValid = phone && cleanDigits(phone).length === 10; // MX 10 dígitos
   const isOrgValid = !!orgId?.trim();
-  const isNameValid = !!firstNames?.trim() || !!(lastNameFather?.trim() || lastNameMother?.trim());
+  const isNameValid =
+    !!firstNames?.trim() || !!(lastNameFather?.trim() || lastNameMother?.trim());
+  const isCedulaValid = cedula && cleanDigits(cedula).length === 8; // MX 8 dígitos
 
   const prettyName = useMemo(() => {
     const fn = (firstNames || "").trim();
@@ -94,12 +155,27 @@ export default function Profile() {
     return [fn, ap, am].filter(Boolean).join(" ");
   }, [firstNames, lastNameFather, lastNameMother]);
 
-  const canSubmit = !!uid && isOrgValid && isNameValid && (!phone || isPhoneValid);
+  // Permitir guardar solo si el perfil NO está cargado
+  const canSubmit =
+    !isProfileLoaded &&
+    !!uid &&
+    isOrgValid &&
+    isNameValid &&
+    (!phone || isPhoneValid) &&
+    (!cedula || isCedulaValid);
 
   async function onSubmit(e) {
     e.preventDefault();
     setMsg("");
     setErr("");
+
+    // Bloqueo si ya existe
+    if (isProfileLoaded) {
+      setErr(
+        "El perfil ya ha sido capturado y guardado previamente. No se permiten modificaciones."
+      );
+      return;
+    }
 
     if (!uid) {
       setErr("No hay sesión activa.");
@@ -117,9 +193,14 @@ export default function Profile() {
       setErr("El teléfono debe tener 10 dígitos (solo números).");
       return;
     }
+    if (cedula && !isCedulaValid) {
+      setErr("La cedula debe de tener 8 dígitos.");
+      return;
+    }
 
     try {
       setSaving(true);
+      setBusyMsg("Guardando perfil…");
       const ref = doc(db, "orgs", orgId.trim(), "doctors", uid);
       await setDoc(
         ref,
@@ -127,219 +208,285 @@ export default function Profile() {
           email: user?.email ?? null,
           orgId: orgId.trim(),
 
-          // Campos segmentados
+          // Segmentado
           firstNames: firstNames.trim(),
           lastNameFather: lastNameFather.trim(),
           lastNameMother: lastNameMother.trim(),
 
-          // Campo compuesto para mostrar en otras pantallas
+          // Compuesto
           name: prettyName,
 
           // Otros
-          phone: cleanDigits(phone), // guardamos solo dígitos
+          phone: cleanDigits(phone),
           role: role.trim(),
           cedula: cedula.trim(),
 
+          createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         },
         { merge: true }
       );
 
       localStorage.setItem("orgId", orgId.trim());
-      setMsg("Perfil guardado.");
+      setMsg("Perfil guardado. Los datos han sido bloqueados para su visualización.");
+      setIsProfileLoaded(true);
+
+      // Mini-toast (3s)
+      setToastMsg("¡Perfil guardado con éxito!");
+      setShowToast(true);
+
+      // Si quieres mantener el modal de confetti:
+      // setShowConfetti(true);
     } catch (e) {
       console.error("Error al guardar perfil:", e);
       setErr("No se pudo guardar el perfil. Revisa la consola y reglas.");
     } finally {
       setSaving(false);
+      setBusyMsg("");
     }
   }
 
-  if (loading || !ready) return <div className="p-8">Cargando…</div>;
+  const rightActions = (
+    <button onClick={handleLogout} className="btn ghost h-10" title="Cerrar sesión">
+      <span className="material-symbols-outlined" style={{marginRight:6}}>logout</span>
+      Cerrar sesión
+    </button>
+  );
+  const isDisabled = saving || isProfileLoaded;
+
+  if (loading || !ready) {
+    return (
+      <AppLayout
+        title="Perfil del doctor"
+        leftActions={
+          <button
+            onClick={() => setSidebarCollapsed((v) => !v)}
+            className="btn-ghost h-9"
+            title={sidebarCollapsed ? "Expandir" : "Contraer"}
+          >
+            <span className="material-symbols-outlined">menu</span>
+          </button>
+        }
+        sidebar={
+          <AppSidebar
+            collapsed={sidebarCollapsed}
+            onToggle={() => setSidebarCollapsed((v) => !v)}
+          />
+        }
+      >
+        <LoadingOverlay open message="Cargando…" />
+      </AppLayout>
+    );
+  }
 
   return (
-    <div className="flex h-screen bg-background-light dark:bg-background-dark font-display">
-      {/* Sidebar unificado */}
-      <AppSidebar collapsed={sidebarCollapsed} />
+    <AppLayout
+      title="Perfil del doctor"
+      rightActions={rightActions}
+      leftActions={
+        <button
+          onClick={() => setSidebarCollapsed((v) => !v)}
+          className="btn-ghost h-9"
+          title={sidebarCollapsed ? "Expandir" : "Contraer"}
+        >
+          <span className="material-symbols-outlined">menu</span>
+        </button>
+      }
+      sidebar={
+        <AppSidebar
+          collapsed={sidebarCollapsed}
+          onToggle={() => setSidebarCollapsed((v) => !v)}
+        />
+      }
+    >
+      <LoadingOverlay open={!!busyMsg} message={busyMsg} />
 
-      {/* Columna principal */}
-      <div className="flex-1 flex flex-col">
-        {/* Header con el mismo toggle */}
-        <header className="h-16 flex items-center justify-between px-4 sm:px-6 bg-white dark:bg-[#0f1520] shadow-sm">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setSidebarCollapsed((v) => !v)}
-              className="rounded-lg p-2 hover:bg-gray-100 dark:hover:bg-gray-800"
-              title={sidebarCollapsed ? "Expandir menú" : "Colapsar menú"}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
-                   fill="none" stroke="currentColor" className="w-6 h-6">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                      d="M3.75 6.75h16.5M3.75 12h16.5M3.75 17.25h16.5" />
-              </svg>
-            </button>
-            <h1 className="text-lg sm:text-xl font-bold tracking-tight">
-              Perfil del doctor
-            </h1>
-          </div>
-        </header>
+      {/* Mini-toast flotante 3s */}
+      {showToast && (
+        <MiniToast message={toastMsg} onClose={() => setShowToast(false)} />
+      )}
 
-        {/* Main */}
-        <main className="flex-1 overflow-y-auto px-4 sm:px-6 py-8">
-          {/* Ruta */}
-          <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-            Ruta: <code>orgs/{orgId || "{orgId}"}/doctors/{uid || "{uid}"}</code>
-          </p>
+      {/* (Opcional) Confetti modal si deseas conservarlo */}
+      {showConfetti && (
+        <ConfettiAlert
+          message="¡Tu perfil ha sido guardado exitosamente y ahora está bloqueado para proteger tus datos!"
+          onClose={() => setShowConfetti(false)}
+        />
+      )}
 
-          {/* Mensajes */}
-          {err && (
-            <div className="mb-4 rounded-md bg-red-50 dark:bg-rose-900/30 p-3 text-red-700 dark:text-rose-200">
-              {err}
-            </div>
-          )}
-          {msg && (
-            <div className="mb-4 rounded-md bg-emerald-50 dark:bg-emerald-900/30 p-3 text-emerald-700 dark:text-emerald-200">
-              {msg}
-            </div>
-          )}
-
-          {/* Tarjeta del formulario */}
-          <div className="bg-white dark:bg-[#121826] border border-gray-200 dark:border-gray-700 rounded-2xl shadow-sm p-6">
-            <form onSubmit={onSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Organización */}
-              <div className="md:col-span-2">
-                <label className="block text-sm font-medium mb-1">Organización / Institución *</label>
-                <input
-                  type="text"
-                  value={orgId}
-                  onChange={(e) => setOrgId(e.target.value)}
-                  placeholder="Ej. docker1, miClinica, etc."
-                  required
-                  className="w-full h-11 px-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-[#0d121b] dark:text-white"
-                />
-              </div>
-
-              {/* Email (solo lectura) */}
-              <div>
-                <label className="block text-sm font-medium mb-1">Correo (solo lectura)</label>
-                <input
-                  type="email"
-                  value={user?.email || ""}
-                  readOnly
-                  className="w-full h-11 px-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-600 dark:text-gray-300"
-                />
-              </div>
-
-              {/* Cédula profesional */}
-              <div>
-                <label className="block text-sm font-medium mb-1">Cédula profesional</label>
-                <input
-                  type="text"
-                  value={cedula}
-                  onChange={(e) => setCedula(e.target.value)}
-                  placeholder="Ej. 1234567"
-                  className="w-full h-11 px-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-[#0d121b] dark:text-white"
-                />
-              </div>
-
-              {/* Nombres */}
-              <div>
-                <label className="block text-sm font-medium mb-1">Nombres *</label>
-                <input
-                  type="text"
-                  value={firstNames}
-                  onChange={(e) => setFirstNames(e.target.value)}
-                  required
-                  placeholder="María Fernanda"
-                  className="w-full h-11 px-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-[#0d121b] dark:text-white"
-                />
-              </div>
-
-              {/* Apellido paterno */}
-              <div>
-                <label className="block text-sm font-medium mb-1">Apellido paterno</label>
-                <input
-                  type="text"
-                  value={lastNameFather}
-                  onChange={(e) => setLastNameFather(e.target.value)}
-                  placeholder="García"
-                  className="w-full h-11 px-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-[#0d121b] dark:text-white"
-                />
-              </div>
-
-              {/* Apellido materno */}
-              <div>
-                <label className="block text-sm font-medium mb-1">Apellido materno</label>
-                <input
-                  type="text"
-                  value={lastNameMother}
-                  onChange={(e) => setLastNameMother(e.target.value)}
-                  placeholder="Hernández"
-                  className="w-full h-11 px-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-[#0d121b] dark:text-white"
-                />
-              </div>
-
-              {/* Teléfono */}
-              <div>
-                <label className="block text-sm font-medium mb-1">
-                  Teléfono {phone ? (isPhoneValid ? "✅" : "❌ 10 dígitos") : ""}
-                </label>
-                <input
-                  type="tel"
-                  inputMode="numeric"
-                  value={phone}
-                  onChange={(e) => {
-                    // Solo dígitos, máx 10
-                    const digits = e.target.value.replace(/\D+/g, "").slice(0, 10);
-                    setPhone(digits);
-                  }}
-                  placeholder="5512345678"
-                  className={`w-full h-11 px-3 rounded-lg border ${
-                    phone && !isPhoneValid
-                      ? "border-rose-500 focus:border-rose-500"
-                      : "border-gray-300 dark:border-gray-600"
-                  } bg-white dark:bg-gray-700 text-[#0d121b] dark:text-white`}
-                />
-                <p className="mt-1 text-xs text-gray-500">
-                  Se guardará como 10 dígitos (sin espacios).
-                </p>
-              </div>
-
-              {/* Rol / Puesto */}
-              <div>
-                <label className="block text-sm font-medium mb-1">Rol / Puesto</label>
-                <input
-                  type="text"
-                  value={role}
-                  onChange={(e) => setRole(e.target.value)}
-                  placeholder="Terapeuta, Admin…"
-                  className="w-full h-11 px-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-[#0d121b] dark:text-white"
-                />
-              </div>
-
-              {/* Botón guardar */}
-              <div className="md:col-span-2 flex justify-end">
-                <button
-                  type="submit"
-                  disabled={!canSubmit || saving}
-                  className={`inline-flex items-center rounded-full h-12 px-6 text-white font-semibold ${
-                    canSubmit && !saving
-                      ? "bg-primary hover:shadow-md"
-                      : "bg-gray-400 cursor-not-allowed"
-                  }`}
-                >
-                  {saving ? "Guardando…" : "Guardar"}
-                </button>
-              </div>
-            </form>
-
-            {/* Vista previa del nombre que se guardará */}
-            <div className="mt-4 text-sm text-gray-600 dark:text-gray-400">
-              <b>Nombre de correo:</b> {prettyName || "—"}
-            </div>
-          </div>
-        </main>
+      {/* RUTA / MENSAJES */}
+      <div className="px-4 sm:px-6 pt-8 maxw-7xl mx-auto">
+        <p className="caption text-muted">Datos requeridos de acuerdo a la NOM</p>
+        {msg && <div className="mt-2 text-primary font-semibold">{msg}</div>}
+        {err && <div className="alert-error-banner mt-2">{err}</div>}
       </div>
-    </div>
+
+      {/* Tarjeta formulario */}
+      <section className="px-4 sm:px-6 pb-8 maxw-7xl mx-auto">
+        <div className="card mt-4 p-6">
+          <form onSubmit={onSubmit} className="fields-grid gap-y-6">
+            {/* Organización */}
+            <div className="form-field span-2">
+              <label className="label">Organización / Institución *</label>
+              <input
+                type="text"
+                value={orgId}
+                onChange={(e) => setOrgId(e.target.value)}
+                placeholder="Ej. miClinica, etc."
+                required
+                className={`input h-11 ${isDisabled ? "input-readonly" : ""}`}
+                readOnly={isDisabled}
+              />
+            </div>
+
+            {/* Email (solo lectura) */}
+            <div className="form-field">
+              <label className="label">Correo (solo lectura)</label>
+              <input
+                type="email"
+                value={user?.email || ""}
+                readOnly
+                className="input input-readonly h-11"
+              />
+            </div>
+
+            {/* Cédula profesional */}
+            <div className="form-field">
+              <label className="label">
+                Cédula Profesional{" "}
+                {cedula && !isDisabled ? (isCedulaValid ? "✅" : "❌ 8 dígitos") : ""}
+              </label>
+              <input
+                type="text"
+                value={cedula}
+                onChange={(e) => {
+                  const char = e.target.value.replace(/\D+/g, "").slice(0, 8);
+                  setCedula(char);
+                }}
+                placeholder="12345678"
+                className={`input h-11 ${
+                  cedula && !isCedulaValid && !isDisabled ? "input-error" : ""
+                } ${isDisabled ? "input-readonly" : ""}`}
+                readOnly={isDisabled}
+              />
+            </div>
+
+            {/* Nombres */}
+            <div className="form-field">
+              <label className="label">Nombres *</label>
+              <input
+                type="text"
+                value={firstNames}
+                onChange={(e) => setFirstNames(e.target.value)}
+                required
+                placeholder="María Fernanda"
+                className={`input h-11 ${isDisabled ? "input-readonly" : ""}`}
+                readOnly={isDisabled}
+              />
+            </div>
+
+            {/* Apellido paterno */}
+            <div className="form-field">
+              <label className="label">Apellido paterno</label>
+              <input
+                type="text"
+                value={lastNameFather}
+                onChange={(e) => setLastNameFather(e.target.value)}
+                placeholder="García"
+                className={`input h-11 ${isDisabled ? "input-readonly" : ""}`}
+                readOnly={isDisabled}
+              />
+            </div>
+
+            {/* Apellido materno */}
+            <div className="form-field">
+              <label className="label">Apellido materno</label>
+              <input
+                type="text"
+                value={lastNameMother}
+                onChange={(e) => setLastNameMother(e.target.value)}
+                placeholder="Hernández"
+                className={`input h-11 ${isDisabled ? "input-readonly" : ""}`}
+                readOnly={isDisabled}
+              />
+            </div>
+
+            {/* Teléfono */}
+            <div className="form-field">
+              <label className="label">
+                Teléfono{" "}
+                {phone && !isDisabled ? (isPhoneValid ? "✅" : "❌ 10 dígitos") : ""}
+              </label>
+              <input
+                type="tel"
+                inputMode="numeric"
+                value={phone}
+                onChange={(e) => {
+                  const digits = e.target.value.replace(/\D+/g, "").slice(0, 10);
+                  setPhone(digits);
+                }}
+                placeholder="5512345678"
+                className={`input h-11 ${
+                  phone && !isPhoneValid && !isDisabled ? "input-error" : ""
+                } ${isDisabled ? "input-readonly" : ""}`}
+                readOnly={isDisabled}
+              />
+              <p className="caption text-muted mt-1">
+                Se guardará como 10 dígitos (sin espacios).
+              </p>
+            </div>
+
+            {/* Rol / Puesto */}
+            <div className="form-field">
+              <label className="label">Rol / Puesto</label>
+              <input
+                type="text"
+                value={role}
+                onChange={(e) => setRole(e.target.value)}
+                placeholder="Terapeuta, Admin…"
+                className={`input h-11 ${isDisabled ? "input-readonly" : ""}`}
+                readOnly={isDisabled}
+              />
+            </div>
+
+            {/* Guardar */}
+            <div className="span-2 flex justify-end mt-4">
+              <button
+                type="submit"
+                disabled={!canSubmit || saving || isProfileLoaded}
+                className={`btn primary h-12 px-6 ${
+                  !canSubmit || saving || isProfileLoaded ? "is-disabled" : ""
+                }`}
+              >
+                {saving ? "Guardando…" : "Guardar"}
+              </button>
+            </div>
+          </form>
+
+          {/* Vista previa del nombre */}
+          <div className="mt-6 caption text-muted">
+            <b>Nombre Completo:</b> {prettyName || "—"}
+          </div>
+
+          {/* Aviso de bloqueo */}
+          {isProfileLoaded && (
+            <div className="mt-4 alert-warn">
+              ⚠️Los datos ya han sido guardados. No se
+              permiten modificaciones.
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* (Si mantienes ConfettiAlert duplicado al final) */}
+      {showConfetti && (
+        <div className="confetti-container">
+          <ConfettiAlert
+            message="¡Tu perfil ha sido guardado exitosamente y ahora está bloqueado para proteger tus datos!"
+            onClose={() => setShowConfetti(false)}
+          />
+        </div>
+      )}
+    </AppLayout>
   );
 }

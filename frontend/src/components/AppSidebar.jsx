@@ -1,15 +1,8 @@
-// src/components/AppSidebar.jsx
 import React from "react";
 import { NavLink } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useDoctorProfile } from "../services/userDoctorProfile";
 
-/**
- * Sidebar reusable y colapsable (controlado por el padre).
- * Ya NO renderiza botón interno de colapsar; usa el del header.
- * Props:
- *  - collapsed (bool)
- */
 export default function AppSidebar({ collapsed = false }) {
   const { user } = useAuth();
   const { orgId, name, photoURL, email } = useDoctorProfile(
@@ -20,26 +13,20 @@ export default function AppSidebar({ collapsed = false }) {
   );
 
   return (
-    <aside
-      className={`flex flex-col bg-light-gray dark:bg-[#141a24] transition-all duration-200 ${
-        collapsed ? "w-16" : "w-72"
-      } p-3`}
-    >
+    <aside className={`app-sidebar ${collapsed ? "collapsed" : ""}`}>
       {/* User card */}
-      <div className="flex items-center gap-3 mb-6">
+      <div className="sidebar-user">
         <img
           src={photoURL}
           alt="Foto de perfil"
-          className="h-10 w-10 rounded-full object-cover"
+          className="sidebar-avatar"
+          referrerPolicy="no-referrer"
         />
         {!collapsed && (
-          <div className="min-w-0">
-            <p className="truncate text-sm font-semibold text-dark-navy dark:text-white">
-              {name}
-            </p>
-            {/* Mostrar correo debajo del nombre */}
+          <div className="user-meta">
+            <p className="user-name trunc" title={name || ""}>{name || "—"}</p>
             {!!email && (
-              <p className="truncate text-xs text-gray-600 dark:text-gray-400">
+              <p className="user-email trunc" title={email}>
                 {email}
               </p>
             )}
@@ -48,92 +35,75 @@ export default function AppSidebar({ collapsed = false }) {
       </div>
 
       {/* Nav */}
-      <nav className="flex flex-col gap-1">
+      <nav className="sidebar-nav">
         <NavLink
           to="/dashboard"
-          className={({ isActive }) =>
-            `flex items-center gap-3 rounded-md px-3 py-2 text-text-primary hover:bg-calm-blue ${
-              isActive ? "bg-calm-blue" : ""
-            }`
-          }
+          className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
           title="Inicio"
         >
           <span className="material-symbols-outlined">house</span>
-          {!collapsed && <span>Inicio</span>}
+          {!collapsed && <span className="nav-text trunc">Inicio</span>}
         </NavLink>
-        
+
         <NavLink
           to="/generate-progress-note"
-          className={({ isActive }) =>
-            `flex items-center gap-3 rounded-md px-3 py-2 text-text-primary hover:bg-calm-blue ${
-              isActive ? "bg-calm-blue" : ""
-            }`
-          }
+          className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
           title="Nueva nota"
         >
           <span className="material-symbols-outlined">add_notes</span>
-          {!collapsed && <span>Nueva nota</span>}
+          {!collapsed && <span className="nav-text trunc">Nueva nota</span>}
         </NavLink>
 
         <NavLink
           to="/patient-list"
-          className={({ isActive }) =>
-            `flex items-center gap-3 rounded-md px-3 py-2 text-text-primary hover:bg-calm-blue ${
-              isActive ? "bg-calm-blue" : ""
-            }`
-          }
+          className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
           title="Pacientes"
         >
           <span className="material-symbols-outlined">group</span>
-          {!collapsed && <span>Pacientes</span>}
+          {!collapsed && <span className="nav-text trunc">Pacientes</span>}
         </NavLink>
 
         <NavLink
           to="/notes"
-          className={({ isActive }) =>
-            `flex items-center gap-3 rounded-md px-3 py-2 text-text-primary hover:bg-calm-blue ${
-              isActive ? "bg-calm-blue" : ""
-            }`
-          }
+          className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
           title="Notas"
         >
           <span className="material-symbols-outlined">notes</span>
-          {!collapsed && <span>Notas</span>}
+          {!collapsed && <span className="nav-text trunc">Notas</span>}
         </NavLink>
 
         <NavLink
           to="/profile"
-          className={({ isActive }) =>
-            `flex items-center gap-3 rounded-md px-3 py-2 text-text-primary hover:bg-calm-blue ${
-              isActive ? "bg-calm-blue" : ""
-            }`
-          }
+          className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
           title="Perfil"
         >
           <span className="material-symbols-outlined">account_circle</span>
-          {!collapsed && <span>Perfil</span>}
+          {!collapsed && <span className="nav-text trunc">Perfil</span>}
         </NavLink>
 
-        <button
-          type="button"
-          className="flex items-center gap-3 rounded-md px-3 py-2 text-left text-text-primary hover:bg-calm-blue"
+        <NavLink
+          to="/settings"
+          className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
           title="Configuración"
-          onClick={() => {}}
         >
-          <span className="material-symbols-outlined">settings</span>
-          {!collapsed && <span>Configuración</span>}
-        </button>
+          <span className="material-symbols-outlined">palette</span>
+          {!collapsed && <span className="nav-text trunc">Configuración</span>}
+        </NavLink>
       </nav>
 
-      <div className="mt-auto pt-4 text-[11px] text-gray-500 dark:text-gray-400">
-        {!collapsed && (
-          <>
-            <div>
-              Org: <span className="font-semibold">{orgId || "—"}</span>
-            </div>
-            <div>© TerappIA</div>
-          </>
+      {/* Footer fijo (org hasta abajo) */}
+      <div className="sidebar-footer">
+        {!collapsed ? (
+          <div className="org-chip" title={orgId || "Sin organización"}>
+            <span className="material-symbols-outlined">business</span>
+            <span className="trunc">{orgId || "—"}</span>
+          </div>
+        ) : (
+          <div className="org-icon" title={orgId || "Sin organización"}>
+            <span className="material-symbols-outlined">business</span>
+          </div>
         )}
+        {!collapsed && <div className="copyright">© TerappIA</div>}
       </div>
     </aside>
   );

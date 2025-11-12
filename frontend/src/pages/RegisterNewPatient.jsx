@@ -5,377 +5,302 @@ import { useAuth } from "../context/AuthContext";
 import { db } from "../services/firebaseConfig";
 import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 
+import AppLayout from "../components/AppLayout";
+import AppSidebar from "../components/AppSidebar";
+import LoadingOverlay from "../components/LoadingOverlay";
+
+// --- UTILIDADES DE VALIDACIÓN ---
+const validateEmail = (email) => {
+    if (!email) return true; // Opcional, si no se captura es válido
+    // Regex simple para email
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+};
+
+const validatePhone = (phone) => {
+    if (!phone) return true; // Opcional
+    // Limpia el número (solo dígitos)
+    const cleaned = phone.replace(/\D/g, '');
+    // Verifica que tenga entre 8 y 15 dígitos (rango internacional común)
+    return cleaned.length >= 8 && cleaned.length <= 15;
+};
+// -------------------------------
+
 export default function RegisterNewPatient() {
-  const navigate = useNavigate();
-  const { user } = useAuth();
-  const uid = user?.uid || null;
+  const navigate = useNavigate();
+  const { user, logout } = useAuth(); // <- Desestructurar logout
+  const uid = user?.uid || null;
 
-  // orgId desde Profile (localStorage)
-  const [orgId, setOrgId] = useState("");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
+  const [orgId, setOrgId] = useState("");
+  useEffect(() => { setOrgId(localStorage.getItem("orgId") || ""); }, []);
 
-  useEffect(() => {
-    const cachedOrg = localStorage.getItem("orgId") || "";
-    setOrgId(cachedOrg);
-  }, []);
+  const [form, setForm] = useState({
+    fullName: "", age: "", gender: "", phone: "", address: "", email: "",
+    medicalConditions: "", allergies: "", medications: "", notes: ""
+  });
 
-  // estado del formulario (controlado)
-  const [form, setForm] = useState({
-    fullName: "",
-    age: "",
-    gender: "",
-    phone: "",
-    address: "",
-    email: "",
-    medicalConditions: "",
-    allergies: "",
-    medications: "",
-    notes: "",
-  });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState("");
+  const [msg, setMsg] = useState("");
 
-  const [saving, setSaving] = useState(false);
-  const [err, setErr] = useState("");
-  const [msg, setMsg] = useState("");
+  const onChange = (e) => setForm(f => ({ ...f, [e.target.name]: e.target.value }));
 
-  const onChange = (e) => {
-    const { name, value } = e.target;
-    setForm((f) => ({ ...f, [name]: value }));
-  };
+  const isEmailValid = useMemo(() => validateEmail(form.email), [form.email]);
+  const isPhoneValid = useMemo(() => validatePhone(form.phone), [form.phone]);
 
-  const isValid = useMemo(() => {
-    return (
-      orgId.trim().length > 0 &&
-      !!uid &&
-      form.fullName.trim().length > 0 &&
-      String(form.age || "").length > 0
-    );
-  }, [orgId, uid, form.fullName, form.age]);
+  const isValid = useMemo(() =>
+    orgId.trim().length > 0 &&
+    !!uid &&
+    form.fullName.trim().length > 0 &&
+    String(form.age || "").length > 0 &&
+    isEmailValid && // <- Validación de email
+    isPhoneValid    // <- Validación de teléfono
+  , [orgId, uid, form.fullName, form.age, isEmailValid, isPhoneValid]);
 
-  const genId = () => {
-    if (window.crypto?.randomUUID) return crypto.randomUUID();
-    return `p_${Date.now()}`;
-  };
+  const genId = () => (crypto?.randomUUID ? crypto.randomUUID() : `p_${Date.now()}`);
 
-  const handleSave = async () => {
-    setErr("");
-    setMsg("");
-    if (!uid) {
-      setErr("No hay sesión activa.");
-      return;
-    }
-    if (!orgId.trim()) {
-      setErr("Debes capturar tu Organización en Perfil antes de registrar pacientes.");
-      return;
-    }
-    if (!isValid) {
-      setErr("Faltan campos obligatorios (Nombre completo y Edad).");
-      return;
+  const handleSave = async () => {
+    setErr(""); setMsg("");
+    if (!uid) return setErr("No hay sesión activa.");
+    if (!orgId.trim()) return setErr("Debes capturar tu Organización en Perfil antes de registrar pacientes.");
+    if (!isValid) {
+        if (!isEmailValid) return setErr("El formato del correo electrónico es inválido.");
+        if (!isPhoneValid) return setErr("El número de teléfono es inválido. Debe contener entre 8 y 15 dígitos.");
+        return setErr("Faltan campos obligatorios (Nombre completo y Edad).");
     }
 
+    try {
+      setSaving(true);
+      const patientId = genId();
+      const ref = doc(db, "orgs", orgId.trim(), "doctors", uid, "patients", patientId);
+      await setDoc(ref, {
+        patientId,
+        fullName: form.fullName.trim(),
+        age: Number(form.age) || null,
+        gender: form.gender || "",
+        phone: form.phone ? form.phone.replace(/\D/g, '') : "", // Guardar solo dígitos
+        address: form.address?.trim() || "",
+        email: form.email?.trim() || "",
+        medicalConditions: form.medicalConditions?.trim() || "",
+        allergies: form.allergies?.trim() || "",
+        medications: form.medications?.trim() || "",
+        notes: form.notes?.trim() || "",
+        orgId: orgId.trim(),
+        doctorUid: uid,
+        doctorEmail: user?.email || null,
+        doctorDisplayName: user?.displayName || null,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+
+      setMsg("Paciente registrado.");
+      navigate("/patient-list", { replace: true });
+    } catch (e) {
+      console.error("Error guardando paciente:", e);
+      setErr("No se pudo registrar el paciente (revisa consola y reglas).");
+    } finally {
+      setSaving(false);
+    }
+  };
+    
+  // Manejador de cierre de sesión
+  const handleLogout = async () => {
     try {
-      setSaving(true);
-      const patientId = genId();
-      const ref = doc(db, "orgs", orgId.trim(), "doctors", uid, "patients", patientId);
-
-      await setDoc(
-        ref,
-        {
-          patientId,
-          fullName: form.fullName.trim(),
-          age: Number(form.age) || null,
-          gender: form.gender || "",
-          phone: form.phone?.trim() || "",
-          address: form.address?.trim() || "",
-          email: form.email?.trim() || "",
-          medicalConditions: form.medicalConditions?.trim() || "",
-          allergies: form.allergies?.trim() || "",
-          medications: form.medications?.trim() || "",
-          notes: form.notes?.trim() || "",
-          orgId: orgId.trim(),
-          doctorUid: uid,
-          doctorEmail: user?.email || null,
-          doctorDisplayName: user?.displayName || null,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true }
-      );
-
-      setMsg("Paciente registrado.");
-      navigate("/patient-list", { replace: true });
+        await logout();
+        navigate("/login", { replace: true });
     } catch (e) {
-      console.error("Error guardando paciente:", e);
-      setErr("No se pudo registrar el paciente (revisa consola y reglas).");
-    } finally {
-      setSaving(false);
+        console.error("Logout failed:", e);
     }
   };
 
-  return (
-    <div className="relative flex h-auto min-h-screen w-full flex-col overflow-x-hidden bg-background-light dark:bg-background-dark font-display text-[#0d121b] dark:text-white">
-      <div className="layout-container flex h-full grow flex-col">
-        {/* Header */}
-        <header className="sticky top-0 z-10 bg-white dark:bg-background-dark shadow-sm">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="flex items-center justify-between whitespace-nowrap h-16">
-              <div className="flex items-center gap-4 text-primary">
-                <div className="size-8">
-                  <svg className="text-primary" fill="none" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M36.7273 44C33.9891 44 31.6043 39.8386 30.3636 33.69C29.123 39.8386 26.7382 44 24 44C21.2618 44 18.877 39.8386 17.6364 33.69C16.3957 39.8386 14.0109 44 11.2727 44C7.25611 44 4 35.0457 4 24C4 12.9543 7.25611 4 11.2727 4C14.0109 4 16.3957 8.16144 17.6364 14.31C18.877 8.16144 21.2618 4 24 4C26.7382 4 29.123 8.16144 30.3636 14.31C31.6043 8.16144 33.9891 4 36.7273 4C40.7439 4 44 12.9543 44 24C44 35.0457 40.7439 44 36.7273 44Z" fill="currentColor"/>
-                  </svg>
-                </div>
-                <h2 className="text-xl font-bold leading-tight tracking-[-0.015em] text-primary">TerappIA</h2>
-              </div>
-              <button
-                onClick={() => navigate("/generate-progress-note")}
-                className="flex min-w-[84px] max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-lg h-10 px-4 bg-primary text-white text-sm font-bold leading-normal tracking-[0.015em]"
-              >
-                <span className="truncate">Regresar</span>
-              </button>
-            </div>
-          </div>
-        </header>
+  const leftActions = (
+    <button
+      onClick={() => setSidebarCollapsed(v => !v)}
+      className="btn-ghost h-9"
+      title={sidebarCollapsed ? "Expandir" : "Contraer"}
+    >
+      <span className="material-symbols-outlined">menu</span>
+    </button>
+  );
+  const rightActions = (
+    <div className="flex-row-center">
+      <button onClick={() => navigate("/patient-list")} className="btn ghost h-10">
+        Regresar
+      </button>
+      {/* BOTÓN DE CERRAR SESIÓN */}
+      <button onClick={handleLogout} className="btn ghost h-10">
+        Cerrar sesión
+      </button>
+    </div>
+  );
 
-        {/* Main */}
-        <main className="flex-1 py-10 px-4 sm:px-6 lg:px-8">
-          <div className="max-w-7xl mx-auto">
-            <div className="flex flex-wrap justify-between gap-3 mb-8">
-              <p className="text-4xl font-black leading-tight tracking-[-0.033em] text-[#0d121b] dark:text-white min-w-72">
-                Registrar paciente
-              </p>
-            </div>
+  return (
+    <AppLayout
+      title="Registrar paciente"
+      leftActions={leftActions}
+      rightActions={rightActions}
+      sidebar={<AppSidebar collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(v => !v)} />}
+    >
+      <LoadingOverlay open={saving} message="Guardando paciente…" />
 
-            {/* Mensajes */}
-            {(err || msg || !orgId) && (
-              <div className="mb-6">
-                {!orgId && (
-                  <div className="rounded-md bg-yellow-50 p-3 text-yellow-800">
-                    ⚠️ Debes capturar tu <strong>Organización</strong> en la página de <strong>Perfil</strong> antes de registrar pacientes.
-                  </div>
-                )}
-                {err && <div className="mt-2 rounded-md bg-red-50 p-3 text-red-700">{err}</div>}
-                {msg && <div className="mt-2 rounded-md bg-green-50 p-3 text-green-700">{msg}</div>}
-              </div>
-            )}
+      <div className="container-pad maxw-7xl">
+        {(err || msg || !orgId) && (
+          <div className="mb-6">
+            {!orgId && (
+              <div className="alert-warn">⚠️ Debes capturar tu <b>Organización</b> en <b>Perfil</b> antes de registrar pacientes.</div>
+            )}
+            {err && <div className="alert-error">{err}</div>}
+            {msg && <div className="alert-success">{msg}</div>}
+          </div>
+        )}
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              {/* Left column */}
-              <div className="lg:col-span-2 space-y-8">
-                {/* Patient data */}
-                <div className="bg-white dark:bg-background-dark/50 rounded-xl shadow-sm p-6">
-                  <h2 className="text-[#0d121b] dark:text-white text-[22px] font-bold leading-tight tracking-[-0.015em] mb-6">
-                    Datos del paciente
-                  </h2>
+        <div className="form-2col">
+          {/* Columna izquierda: formulario */}
+          <div className="form-stack">
+            <div className="card p-6">
+              <h2 className="section-title mb-6">Datos del paciente</h2>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <label className="flex flex-col">
-                      <p className="text-[#0d121b] dark:text-white text-base font-medium leading-normal pb-2">
-                        Nombre completo *
-                      </p>
-                      <input
-                        name="fullName"
-                        value={form.fullName}
-                        onChange={onChange}
-                        placeholder="Nombre completo"
-                        className="form-input flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-lg text-[#0d121b] dark:text-white focus:outline-0 focus:ring-2 focus:ring-primary/50 border border-gray-300 dark:border-gray-600 bg-background-light dark:bg-background-dark h-12 placeholder:text-gray-400 dark:placeholder-gray-500 p-3 text-base font-normal"
-                        required
-                      />
-                    </label>
+              <div className="fields-grid">
+                <label className="form-field">
+                  <span className="label">Nombre completo *</span>
+                  <input
+                    name="fullName"
+                    value={form.fullName}
+                    onChange={onChange}
+                    placeholder="Nombre completo"
+                    className="input h-12"
+                    required
+                  />
+                </label>
 
-                    <label className="flex flex-col">
-                      <p className="text-[#0d121b] dark:text-white text-base font-medium leading-normal pb-2">
-                        Edad *
-                      </p>
-                      <input
-                        type="number"
-                        name="age"
-                        value={form.age}
-                        onChange={onChange}
-                        placeholder="Edad"
-                        className="form-input flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-lg text-[#0d121b] dark:text-white focus:outline-0 focus:ring-2 focus:ring-primary/50 border border-gray-300 dark:border-gray-600 bg-background-light dark:bg-background-dark h-12 placeholder:text-gray-400 dark:placeholder-gray-500 p-3 text-base font-normal"
-                        required
-                      />
-                    </label>
+                <label className="form-field">
+                  <span className="label">Edad *</span>
+                  <input
+                    type="number"
+                    name="age"
+                    value={form.age}
+                    onChange={onChange}
+                    placeholder="Edad"
+                    className="input h-12"
+                    required
+                  />
+                </label>
 
-                    <label className="flex flex-col">
-                      <p className="text-[#0d121b] dark:text-white text-base font-medium leading-normal pb-2">
-                        Género
-                      </p>
-                      <select
-                        name="gender"
-                        value={form.gender}
-                        onChange={onChange}
-                        className="form-select flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-lg text-[#0d121b] dark:text-white focus:outline-0 focus:ring-2 focus:ring-primary/50 border border-gray-300 dark:border-gray-600 bg-background-light dark:bg-background-dark h-12 placeholder:text-gray-400 dark:placeholder-gray-500 p-3 text-base font-normal"
-                      >
-                        <option value="">Seleccionar género</option>
-                        <option value="Masculino">Masculino</option>
-                        <option value="Femenino">Femenino</option>
-                        <option value="Otro">Otro</option>
-                      </select>
-                    </label>
+                <label className="form-field">
+                  <span className="label">Género</span>
+                  <div className="select-wrap">
+                    <select
+                      name="gender"
+                      value={form.gender}
+                      onChange={onChange}
+                      className="select h-12"
+                    >
+                      <option value="">Seleccionar género</option>
+                      <option value="Masculino">Masculino</option>
+                      <option value="Femenino">Femenino</option>
+                      <option value="Otro">Otro</option>
+                    </select>
+                  </div>
+                </label>
 
-                    <label className="flex flex-col">
-                      <p className="text-[#0d121b] dark:text-white text-base font-medium leading-normal pb-2">
-                        Teléfono
-                      </p>
-                      <input
-                        name="phone"
-                        type="tel"
-                        value={form.phone}
-                        onChange={onChange}
-                        placeholder="Número de teléfono"
-                        className="form-input flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-lg text-[#0d121b] dark:text-white focus:outline-0 focus:ring-2 focus:ring-primary/50 border border-gray-300 dark:border-gray-600 bg-background-light dark:bg-background-dark h-12 placeholder:text-gray-400 dark:placeholder-gray-500 p-3 text-base font-normal"
-                      />
-                    </label>
+                <label className="form-field">
+                  <span className="label">Teléfono {form.phone && !isPhoneValid && <span className="text-error">❌</span>}</span>
+                  <input
+                    name="phone"
+                    type="tel"
+                    value={form.phone}
+                    onChange={onChange}
+                    placeholder="5512345678"
+                    className={`input h-12 ${form.phone && !isPhoneValid ? 'input-error' : ''}`}
+                  />
+                  <span className="caption text-muted">Se recomienda capturar 8-15 dígitos.</span>
+                </label>
 
-                    <label className="flex flex-col md:col-span-2">
-                      <p className="text-[#0d121b] dark:text-white text-base font-medium leading-normal pb-2">
-                        Dirección
-                      </p>
-                      <input
-                        name="address"
-                        value={form.address}
-                        onChange={onChange}
-                        placeholder="Dirección completa"
-                        className="form-input flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-lg text-[#0d121b] dark:text-white focus:outline-0 focus:ring-2 focus:ring-primary/50 border border-gray-300 dark:border-gray-600 bg-background-light dark:bg-background-dark h-12 placeholder:text-gray-400 dark:placeholder-gray-500 p-3 text-base font-normal"
-                      />
-                    </label>
+                <label className="form-field span-2">
+                  <span className="label">Dirección</span>
+                  <input
+                    name="address"
+                    value={form.address}
+                    onChange={onChange}
+                    placeholder="Dirección completa"
+                    className="input h-12"
+                  />
+                </label>
 
-                    <label className="flex flex-col md:col-span-2">
-                      <p className="text-[#0d121b] dark:text-white text-base font-medium leading-normal pb-2">
-                        Correo electrónico
-                      </p>
-                      <input
-                        name="email"
-                        type="email"
-                        value={form.email}
-                        onChange={onChange}
-                        placeholder="ejemplo@correo.com"
-                        className="form-input flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-lg text-[#0d121b] dark:text-white focus:outline-0 focus:ring-2 focus:ring-primary/50 border border-gray-300 dark:border-gray-600 bg-background-light dark:bg-background-dark h-12 placeholder:text-gray-400 dark:placeholder-gray-500 p-3 text-base font-normal"
-                      />
-                    </label>
-                  </div>
-                </div>
+                <label className="form-field span-2">
+                  <span className="label">Correo electrónico {form.email && !isEmailValid && <span className="text-error">❌</span>}</span>
+                  <input
+                    name="email"
+                    type="email"
+                    value={form.email}
+                    onChange={onChange}
+                    placeholder="ejemplo@correo.com"
+                    className={`input h-12 ${form.email && !isEmailValid ? 'input-error' : ''}`}
+                  />
+                </label>
+              </div>
+            </div>
 
-                {/* Medical history */}
-                <div className="bg-white dark:bg-background-dark/50 rounded-xl shadow-sm p-6">
-                  <h2 className="text-[#0d121b] dark:text-white text-[22px] font-bold leading-tight tracking-[-0.015em] mb-6">
-                    Historial médico
-                  </h2>
+            <div className="card p-6">
+              <h2 className="section-title mb-6">Historial médico</h2>
+              <div className="fields-stack">
+                <label className="form-field">
+                  <span className="label">Condiciones médicas previas</span>
+                  <textarea
+                    name="medicalConditions"
+                    value={form.medicalConditions}
+                    onChange={onChange}
+                    placeholder="Liste condiciones relevantes…"
+                    className="textarea"
+                  />
+                </label>
+                <label className="form-field">
+                  <span className="label">Alergias</span>
+                  <textarea
+                    name="allergies"
+                    value={form.allergies}
+                    onChange={onChange}
+                    placeholder="Liste alergias conocidas…"
+                    className="textarea"
+                  />
+                </label>
+                <label className="form-field">
+                  <span className="label">Medicamentos actuales</span>
+                  <textarea
+                    name="medications"
+                    value={form.medications}
+                    onChange={onChange}
+                    placeholder="Liste medicamentos actuales…"
+                    className="textarea"
+                  />
+                </label>
+                <label className="form-field">
+                  <span className="label">Notas adicionales</span>
+                  <textarea
+                    name="notes"
+                    value={form.notes}
+                    onChange={onChange}
+                    placeholder="Añada cualquier nota adicional aquí…"
+                    className="textarea"
+                  />
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
 
-                  <div className="grid grid-cols-1 gap-6">
-                    <label className="flex flex-col">
-                      <p className="text-[#0d121b] dark:text-white text-base font-medium leading-normal pb-2">
-                        Condiciones médicas previas
-                      </p>
-                      <textarea
-                        name="medicalConditions"
-                        value={form.medicalConditions}
-                        onChange={onChange}
-                        placeholder="Liste condiciones relevantes..."
-                        className="form-textarea flex w-full min-w-0 flex-1 resize-y overflow-hidden rounded-lg text-[#0d121b] dark:text-white focus:outline-0 focus:ring-2 focus:ring-primary/50 border border-gray-300 dark:border-gray-600 bg-background-light dark:bg-background-dark min-h-[120px] placeholder:text-gray-400 dark:placeholder-gray-500 p-3 text-base font-normal"
-                      />
-                    </label>
-
-                    <label className="flex flex-col">
-                      <p className="text-[#0d121b] dark:text-white text-base font-medium leading-normal pb-2">
-                        Alergias
-                      </p>
-                      <textarea
-                        name="allergies"
-                        value={form.allergies}
-                        onChange={onChange}
-                        placeholder="Liste alergias conocidas..."
-                        className="form-textarea flex w-full min-w-0 flex-1 resize-y overflow-hidden rounded-lg text-[#0d121b] dark:text-white focus:outline-0 focus:ring-2 focus:ring-primary/50 border border-gray-300 dark:border-gray-600 bg-background-light dark:bg-background-dark min-h-[120px] placeholder:text-gray-400 dark:placeholder-gray-500 p-3 text-base font-normal"
-                      />
-                    </label>
-
-                    <label className="flex flex-col">
-                      <p className="text-[#0d121b] dark:text-white text-base font-medium leading-normal pb-2">
-                        Medicamentos actuales
-                      </p>
-                      <textarea
-                        name="medications"
-                        value={form.medications}
-                        onChange={onChange}
-                        placeholder="Liste medicamentos actuales..."
-                        className="form-textarea flex w-full min-w-0 flex-1 resize-y overflow-hidden rounded-lg text-[#0d121b] dark:text-white focus:outline-0 focus:ring-2 focus:ring-primary/50 border border-gray-300 dark:border-gray-600 bg-background-light dark:bg-background-dark min-h-[120px] placeholder:text-gray-400 dark:placeholder-gray-500 p-3 text-base font-normal"
-                      />
-                    </label>
-
-                    <label className="flex flex-col">
-                      <p className="text-[#0d121b] dark:text-white text-base font-medium leading-normal pb-2">
-                        Notas adicionales
-                      </p>
-                      <textarea
-                        name="notes"
-                        value={form.notes}
-                        onChange={onChange}
-                        placeholder="Añada cualquier nota adicional aquí..."
-                        className="form-textarea flex w-full min-w-0 flex-1 resize-y overflow-hidden rounded-lg text-[#0d121b] dark:text-white focus:outline-0 focus:ring-2 focus:ring-primary/50 border border-gray-300 dark:border-gray-600 bg-background-light dark:bg-background-dark min-h-[120px] placeholder:text-gray-400 dark:placeholder-gray-500 p-3 text-base font-normal"
-                      />
-                    </label>
-                  </div>
-                </div>
-              </div>
-
-              {/* Right column */}
-              <div className="lg:col-span-1">
-                <div className="sticky top-24">
-                  <div className="bg-white dark:bg-background-dark/50 rounded-xl shadow-sm p-6">
-                    <h3 className="text-[#0d121b] dark:text-white text-lg font-bold mb-4">
-                      Adjuntar documentos
-                    </h3>
-                    <div className="flex flex-col items-center justify-center p-6 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg bg-background-light dark:bg-background-dark">
-                      <span className="material-symbols-outlined text-5xl text-gray-400 dark:text-gray-500">
-                        description
-                      </span>
-                      <p className="mt-2 text-sm text-gray-500 dark:text-gray-400 text-center">
-                        Arrastra y suelta archivos o
-                      </p>
-                      <button
-                        type="button"
-                        disabled
-                        className="mt-4 flex min-w-[84px] max-w-[480px] cursor-not-allowed items-center justify-center overflow-hidden rounded-lg h-10 px-4 bg-primary/60 text-white text-sm font-bold leading-normal tracking-[0.015em]"
-                        title="Conectamos a GCS en el siguiente paso"
-                      >
-                        <span className="truncate">Seleccionar archivos</span>
-                      </button>
-                      <p className="mt-2 text-xs text-gray-500 dark:text-gray-400 text-center">
-                        Se guardarán en: <code>gs://{orgId || "org"}/{uid || "doctor"}/{"{patientId}"}/sessions/...</code>
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Submit */}
-            <div className="mt-12 flex justify-center">
-              <button
-                onClick={handleSave}
-                disabled={!isValid || !orgId || !uid || saving}
-                className="flex min-w-[200px] max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-lg h-12 px-6 bg-primary text-white text-base font-bold leading-normal tracking-[0.015em] disabled:opacity-60"
-              >
-                <span className="truncate">{saving ? "Guardando..." : "Registrar paciente"}</span>
-              </button>
-            </div>
-          </div>
-        </main>
-
-        {/* Footer */}
-        <footer className="bg-white dark:bg-background-dark/50 mt-auto border-t border-gray-200 dark:border-gray-700">
-          <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
-            <div className="flex flex-col sm:flex-row justify-between items-center text-sm text-gray-500 dark:text-gray-400">
-              <div className="flex space-x-4 mb-4 sm:mb-0">
-                <a href="#" className="hover:text-primary">Contact Us</a>
-                <a href="#" className="hover:text-primary">Privacy Policy</a>
-                <a href="#" className="hover:text-primary">Terms of Service</a>
-              </div>
-              <p>© 2024 MentalHealthNLP. All rights reserved.</p>
-            </div>
-          </div>
-        </footer>
-      </div>
-    </div>
-  );
+        {/* CTA */}
+        <div className="mt-6 flex-row-center" style={{ justifyContent: "center" }}>
+          <button
+            onClick={handleSave}
+            disabled={!isValid || !orgId || !uid || saving}
+            className="btn-primary h-12"
+            style={{ minWidth: 220, opacity: (!isValid || !orgId || !uid || saving) ? .6 : 1 }}
+          >
+            {saving ? "Guardando…" : "Registrar paciente"}
+          </button>
+        </div>
+      </div>
+    </AppLayout>
+  );
 }

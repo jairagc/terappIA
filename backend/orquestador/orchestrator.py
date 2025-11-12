@@ -122,8 +122,8 @@ def soften_unbreakables(s: str, chunk: int = 60) -> str:
 
 # ──────────────────────────────────────────────────────────────────────────────
 app = FastAPI(title="Orquestador (Foto→OCR→Análisis | Audio→Transcripción→Análisis)")
-FRONTEND_ORIGIN = ["https://frontend-826777844588.us-central1.run.app"]
-
+#FRONTEND_ORIGIN = ["https://frontend-826777844588.us-central1.run.app"]
+FRONTEND_ORIGIN = "http://localhost:5173/"
 app.add_middleware(
     CORSMiddleware,
     allow_origins=FRONTEND_ORIGIN,

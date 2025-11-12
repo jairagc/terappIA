@@ -1,6 +1,881 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+/* ===========================================================
+   TOKENS GLOBALES (toca aquí radios, alturas y sombras)
+   =========================================================== */
+:root{
+  /* Layout base */
+  --header-h: 64px;
+  --sidebar-w: 150px;         /* ancho sidebar expandido */
+  --sidebar-w-collapsed: 40px;/* ancho sidebar colapsado */
 
-/* (optional) small tweak so Material Symbols align nicely */
-.material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; }
+  /* Radios redondeados */
+  --radius-card: 16px;
+  --radius-input: 12px;
+  --radius-btn: 12px;
+  --radius-pill: 999px;
+
+  /* Alturas estándar */
+  --h-btn-sm: 30px;           /* .h-9  */
+  --h-btn-md: 40px;           /* .h-10 */
+  --h-input: 44px;            /* .h-input / .h-12 */
+
+  /* Sombras (elevación) */
+  --elev-1: 0 1px 8px  rgba(0,0,0,.04);
+  --elev-2: 0 6px 18px rgba(0,0,0,.10);
+  --elev-3: 0 8px 24px rgba(0,0,0,.12);
+
+  /* Espaciados utilitarios */
+  --space-1: 6px;
+  --space-2: 10px;
+  --space-3: 14px;
+  --space-4: 20px;
+
+  /* Superficie suave (derivado del tema activo) */
+  --surface-2: color-mix(in oklab, var(--card) 92%, black 8%);
+}
+
+.no-border {
+  border: none !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+/* ===========================================================
+   RESETEO Y TIPOGRAFÍA BASE
+   =========================================================== */
+html, body, #root { height:100%; display: flex; flex-direction: column; overflow-y: hidden;}
+html, body, #root, .app-shell, .app-main{ overflow-x:hidden; } /* evita scroll horizontal */
+body{
+  margin:0;
+  background:var(--bg);
+  color:var(--text);
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+  letter-spacing:.1px;
+}
+h1,h2,h3{ font-weight:800; letter-spacing:.2px; }
+.caption{ font-size:12px; line-height:1.35; }
+.text-muted{ opacity:.72; margin: 10px; }
+.truncate, .trunc{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+/* ===========================================================
+   ESTRUCTURA DEL SHELL (Header + Sidebar + Main + Footer)
+   =========================================================== */
+/* HEADER (barra superior pegada) */
+.app-header{
+  height:var(--header-h);
+  position:sticky; top:0; z-index:20;
+  display:flex; align-items:center; justify-content:space-between; gap:12px;
+  background:var(--header-bg); color:var(--header-text);
+  border-bottom:1px solid var(--ring);
+  padding:0 16px;
+}
+.header-actions{ display:flex; gap:8px; }
+/* Botones del header (transparentes con hover suave) */
+.app-header .btn, .app-header .btn.icon, .app-header .btn.ghost{
+  color:var(--header-text); border-color:transparent; background:transparent;
+}
+.app-header .btn:hover,
+.app-header .btn.icon:hover,
+.app-header .btn.ghost:hover{ background:rgba(255,255,255,.08); }
+
+/* CONTENEDOR DE APP (Sidebar + Main) */
+.app-shell{ display:flex; flex:1; min-height:0; overflow: hidden;}
+.app-main{ flex:1; min-height:0; overflow-y:auto; background:var(--bg); padding-bottom:50px; 
+  /* Agregado para forzar la separación si el contenido no usa contenedores */
+  padding-left: 20px;
+  padding-top: 20px;
+  padding-right: 20px;
+}
+
+/* FOOTER (opcional, pegado abajo) */
+.app-footer{
+  border-top:1px solid var(--ring);
+  background:var(--footer-bg, var(--card));
+  color:var(--footer-text, var(--text));
+  padding:12px 16px;
+  position:sticky; bottom:0; z-index:10;
+}
+
+/* ===========================================================
+   SIDEBAR (Navegación lateral + colapsado)
+   =========================================================== */
+/* Sidebar expandido/colapsado. Toca --sidebar-w y --sidebar-w-collapsed arriba */
+.app-sidebar {
+  display:flex; flex-direction:column;
+  height:100%;
+  width: var(--sidebar-w);
+  min-width: var(--sidebar-w);
+  background: var(--sidebar-bg);
+  color: var(--sidebar-text);
+  border-right: 1px solid var(--ring);
+  padding: 20px 10px;
+  overflow: hidden; /* evita desbordes horizontales */
+}
+.app-sidebar.collapsed {
+  width: var(--sidebar-w-collapsed);
+  min-width: var(--sidebar-w-collapsed);
+}
+
+/* Tarjeta de usuario (foto + datos). En colapsado se truncará por ancho */
+.sidebar-user { display:flex; align-items:center; gap:10px; margin-bottom:12px; }
+.sidebar-avatar { height:40px; width:40px; border-radius:999px; object-fit:cover; flex:0 0 auto; }
+.user-meta{ min-width:0; }
+.user-name  { font-weight:700; font-size:14px; line-height:1.2; }
+.user-email { font-size:12px; opacity:.75; line-height:1.2; }
+
+/* Navegación (lista de links) */
+.sidebar-nav{
+  display:flex; flex-direction:column; gap:6px;
+  overflow-y:auto; padding-right:0;
+}
+.nav-item{
+  display:flex; align-items:center; gap:10px;
+  padding:10px 10px; border-radius:10px;
+  text-decoration:none; color:inherit; border:1px solid transparent;
+}
+.nav-item:hover{ background: var(--surface-2); border-color:var(--ring); }
+.nav-item.active{
+  background: color-mix(in oklab, var(--primary) 10%, white 90%);
+  border-color: color-mix(in oklab, var(--primary) 22%, white 78%);
+}
+.nav-text{ min-width:0; } /* para truncar texto largo */
+
+/* Footer del sidebar (org + copyright al fondo) */
+.sidebar-footer{
+  margin-top:auto; padding-top:30px; padding-bottom: 30px;
+  display:flex; flex-direction:column; gap:10px;
+}
+.org-chip{
+  display:flex; align-items:center; gap:8px;
+  border:1px solid var(--ring); background:var(--surface-1);
+  border-radius:999px; padding:8px 10px; max-width:100%;
+}
+.org-icon{
+  display:inline-flex; align-items:center; justify-content:center;
+  height:36px; width:36px; border:1px solid var(--ring);
+  background:var(--surface-1); border-radius:999px; margin-left:4px;
+}
+.copyright{ font-size:11px; opacity:.7; padding-left:2px; }
+
+/* ===========================================================
+   ELEMENTOS BASE (Cards, Botones, Inputs)
+   =========================================================== */
+
+/* Cards / Sections */
+.card{
+  background:var(--card);
+  border:1px solid var(--ring);
+  border-radius:var(--radius-card);
+  padding:20px;
+  margin-bottom: 25px;
+  margin-left: 15px;
+  margin-top: 10px;
+  box-shadow:var(--elev-1);
+  
+}
+.section{
+  background:var(--surface-2);
+  border:1px solid var(--ring);
+  border-radius:var(--radius-card);
+  padding:16px;
+}
+
+/* Botones base y variantes */
+.btn{
+  display:inline-flex; align-items:center; justify-content:center; gap:.5rem;
+  border-radius:var(--radius-btn);
+  padding:8px 14px;
+  font-weight:600; cursor:pointer;
+  border:1px solid var(--ring);
+  background:var(--card); color:var(--text);
+  transition: transform .06s ease, box-shadow .12s ease, background .12s ease, color .12s ease, border-color .12s ease;
+  box-shadow:var(--elev-1);
+}
+.btn:hover{ transform:translateY(-1px); box-shadow: 0 8px 20px color-mix(in srgb, var(--alt4) 35%, transparent);}
+.btn:active{ transform:translateY(0); box-shadow:var(--elev-1); }
+.btn.primary{ background:var(--primary); color:#fff; border-color:transparent; }
+.btn.ghost{ background:transparent; }
+.btn.outline{ background:transparent; color:var(--text); border:1px solid var(--ring); }
+.btn.outline:hover{ background: color-mix(in oklab, var(--muted) 70%, transparent); }
+.btn.icon{ width:36px; height:36px; padding:0; border-radius:10px; }
+
+.h-9  { height:var(--h-btn-sm);  padding:0 var(--space-2); }
+.h-10 { height:var(--h-btn-md);  padding:0 var(--space-2); }
+
+/* Inputs / selects / textarea (uniformes) */
+button, input, select, textarea,
+.input, .select, .textarea{
+  font:inherit;
+  border-radius:var(--radius-input);
+  border:1px solid var(--ring);
+  background:var(--card);
+  color:var(--text);
+}
+input,select,textarea{ padding:8px 10px; }
+.h-input, .input.h-12, .select.h-12 { height:var(--h-input); padding:0 var(--space-2); }
+input:focus,select:focus,textarea:focus{ 
+  outline:3px solid color-mix(in oklab, var(--alt2) 50%, transparent);  
+  outline-offset:2px; 
+}
+
+/* Select con caret custom (quita flecha nativa) */
+.select, select.select{
+  -webkit-appearance:none !important; -moz-appearance:none !important; appearance:none !important;
+  background-image:none !important; padding-right:36px;
+}
+select.select::-ms-expand { display:none; }
+.select-wrap{ position:relative; display:block; }
+.select-wrap .select{ width:100%; }
+.select-wrap::after{
+  content:"expand_more"; font-family:"Material Symbols Outlined";
+  position:absolute; right:12px; top:50%; transform:translateY(-50%);
+  font-size:20px; opacity:.65; pointer-events:none;
+}
+
+/* Helpers de layout */
+.container-pad{ padding: var(--space-3) var(--space-4); }
+.section-pad{  padding: var(--space-3) var(--space-4); }
+.text-center{  text-align:center; }
+
+
+/* ===========================================================
+   PILLS / BARRAS DE FILTRO (con colores del tema alt1/alt2/alt3)
+   =========================================================== */
+
+/* Barra contenedora */
+.pillbar{
+  display:flex; align-items:center; justify-content:space-between; gap:10px; 
+  background:var(--muted); border:1px solid var(--ring);
+  border-radius:var(--radius-card); padding:12px 14px;
+}
+.pillbar-left{ display:flex; flex-wrap:wrap; gap:12px 18px; align-items:center; }
+.pillbar-right{ display:flex; align-items:center; }
+
+/* Pill base */
+.pill{
+  display:inline-flex; align-items:center; gap:8px;
+  border-radius:var(--radius-pill); padding:8px 12px; line-height:1;
+  font-weight:700; border:1px solid var(--ring);
+  background:var(--card); color:var(--text);
+  transition:filter .15s ease, transform .06s ease, box-shadow .15s ease;
+  box-shadow: var(--elev-1);
+}
+.pill:hover{ filter:brightness(.98); box-shadow: var(--elev-2); }
+.pill .material-symbols-outlined{ font-size:18px; }
+
+/* Variantes con la paleta del tema: 
+   - pill-total → usa alt1 (azules en "coastal", verdes en "pastel")
+   - pill-filtered → usa alt2 (lila en "coastal", amarillo en "pastel")
+   Si quieres “verde” fijo para filtered en coastal, usa .pill-green más abajo. */
+.pill-total{
+  background: color-mix(in oklab, var(--alt3) 30%, white 78%);
+  color:      color-mix(in oklab, var(--alt3) 62%, black 38%);
+  border-color: color-mix(in oklab, var(--alt3) 38%, white 62%);
+}
+/* MODIFICACIÓN: Ajuste de intensidad para ser más similar a pill-total y usar ALT2 */
+.pill-filtered{
+  background: color-mix(in oklab, var(--alt4) 40%, white 78%); /* Reducido al 30% */
+  color:      color-mix(in oklab, var(--alt4) 62%, black 38%); /* Aumentado contraste */
+  border-color: color-mix(in oklab, var(--alt4) 38%, white 62%); /* Reducido al 38% */
+}
+
+/* Forzar “verde” temático (por si tu tema no trae verde en alt2) */
+.pill-green{
+  background: color-mix(in oklab, #22c55e 18%, white 82%);
+  color:      color-mix(in oklab, #22c55e 55%, black 45%);
+  border-color: color-mix(in oklab, #22c55e 35%, white 65%);
+}
+
+/* Utilitarias */
+.pill-ghost   { background:var(--card); }
+.pill-primary { background:var(--primary); color:#fff; border-color:transparent; }
+.pill-ok      { background: color-mix(in oklab, var(--alt3) 16%, white 84%); 
+                color:      color-mix(in oklab, var(--alt3) 55%, black 45%);
+                border-color: color-mix(in oklab, var(--alt3) 34%, white 66%); }
+.pill-toggle  { cursor:pointer; user-select:none; }
+.pill-input   { padding-right:10px; }
+.pill-input .label{ opacity:.85; font-weight:600; margin-right:10px; }
+
+.pill-search{ min-width:360px; border:1px solid var(--ring); }
+.pill-search input{
+  border:none; background:transparent; outline:0; color:inherit; font:inherit; min-width:0; width:100%;
+}
+@media (max-width: 960px){
+  .pillbar{ flex-direction:column; align-items:stretch; }
+  .pillbar-right, .pill-search{ width:100%; min-width:0; }
+}
+
+/* ===========================================================
+   LISTAS (Pacientes / Notas) – Tarjetas rectangulares
+   =========================================================== */
+
+/* Grids responsivos: minmax ancho mínimo de tarjeta y se rellena con 1fr */
+.list-grid{
+  display:grid; 
+  gap:20px; /* MODIFICACIÓN: Aumentado el gap de 16px a 20px */
+  padding: 20px;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+}
+.patients-grid{
+  display:grid; 
+  gap:20px; /* MODIFICACIÓN: Aumentado el gap de 16px a 20px */
+  padding: 20px;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+}
+.notes-grid{
+  display:grid; 
+  gap:20px; /* MODIFICACIÓN: Aumentado el gap de 16px a 20px */
+  padding: 20px;
+  grid-template-columns: repeat(auto-fill, minmax(520px, 1fr));
+}
+@media (max-width: 640px){
+  .list-grid, .patients-grid, .notes-grid { grid-template-columns:1fr; padding: 12px; }
+}
+
+/* Tarjeta base (paciente/nota) con interior más respirado */
+.item-card, .note-card{
+  background:var(--card); border:1px solid var(--ring);
+  border-radius:var(--radius-card);
+  padding:14px 14px 12px;
+  box-shadow:var(--elev-1);
+}
+
+/* Encabezado del ítem: avatar + nombre + meta */
+.item-head{ display:flex; align-items:center; gap:14px; }
+
+/* Avatar redondo para iniciales (círculo con color temático) */
+.item-avatar{
+  width:40px; height:40px; border-radius:999px; flex-shrink:0;
+  display:flex; align-items:center; justify-content:center;
+  font-weight:800; color:#fff;
+  /* Fondo: usa alt3 por defecto; cámbialo si quieres otro acento */
+  background: color-mix(in oklab, var(--alt4) 505%, black 45%);
+  box-shadow: var(--elev-1);
+  
+}
+
+.item-title{
+  font-weight:800; font-size:16px; margin:0;
+  line-height:1.25;
+}
+.item-meta{
+  margin-top:2px;
+  font-size:12.5px; opacity:.78;
+}
+
+/* Cuerpo/preview dentro de la card */
+.item-body{
+  margin-top:8px;
+  color: var(--text);
+}
+.item-body .preview{
+  color: var(--text);
+  opacity:.80;
+  display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden;
+}
+
+/* Barra de acciones al pie del ítem */
+.item-actions{
+  margin-top:10px;
+  display:flex; align-items:center; justify-content:space-between; gap:10px;
+}
+
+/* Badges y chips */
+.id-pill{
+  display:inline-flex; align-items:center; gap:6px;
+  border-radius:12px; padding:6px 10px; font-weight:700; font-size:12.5px;
+  background: color-mix(in oklab, var(--alt3) 30%, white 82%);
+  color:      color-mix(in oklab, var(--alt3) 55%, black 45%);
+  border:1px solid color-mix(in oklab, var(--alt1) 36%, white 64%);
+  max-width: 100%;
+  margin-bottom: 20px;
+}
+.id-pill .label { max-width: 220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+.emochip{
+  display:inline-flex; align-items:center; gap:6px;
+  border-radius:999px; padding:6px 10px; font-weight:700; font-size:12px;
+  background:var(--muted); border:1px solid var(--ring); color:var(--text);
+}
+
+/* Botones dentro de ítems con alturas iguales */
+.item-actions .btn,
+.item-actions .pill { height:36px; }
+
+/* Utilidad de truncado corta IDs/URLs para no “reventar” la card */
+.trunc-160{ max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+@media (min-width: 1024px){ .trunc-160{ max-width:260px; } }
+
+
+/* ===========================================================
+   DASHBOARD (métricas y acciones)
+   =========================================================== */
+/* Métricas 4x */
+.stats-grid{ display:grid; gap: 10px; grid-template-columns:repeat(12,1fr); }
+.stat{
+  grid-column:span 3; background:var(--muted); border:1px solid var(--ring);
+  border-radius:var(--radius-card); padding:10px;
+}
+@media (max-width:600px){ .stat{ grid-column:span 4; } }
+@media (max-width:450px ){ .stat{ grid-column:span 6; } }
+@media (max-width:170px ){ .stat{ grid-column:span 12;} }
+
+/* Acciones (4 tarjetas responsivas con min ancho) */
+.action-grid--fixed4{
+  display:grid; grid-template-columns: repeat(4, minmax(150px, 250px));
+  column-gap:90px; row-gap:30px; padding:20px 35px;
+}
+@media (max-width:600px){ .action-grid--fixed4{ grid-template-columns:repeat(3, minmax(260px,1fr)); } }
+@media (max-width:450px ){ .action-grid--fixed4{ grid-template-columns:repeat(2, minmax(260px,1fr)); } }
+@media (max-width:255px ){ .action-grid--fixed4{ grid-template-columns:1fr; } }
+
+.action-card{
+  width:100%; min-height:130px;
+  background:var(--muted); border:1px solid var(--ring);
+  border-radius:var(--radius-card); padding:12px; text-align:center;
+  display:flex; flex-direction:column; align-items:center; justify-content:flex-start;
+  box-shadow:0 2px 14px rgba(0,0,0,.08);
+  transition:transform .08s ease, box-shadow .15s ease, background .2s ease;
+}
+.action-card:hover{ transform:translateY(-2px); box-shadow:0 8px 22px rgba(0,0,0,.10); }
+.action-card .icon-badge{
+  width:40px; height:40px; border-radius:999px;
+  background:var(--card); border:1px solid var(--ring);
+  display:flex; align-items:center; justify-content:center; margin:20px 0;
+}
+
+/* ===========================================================
+   FORMULARIOS (2 columnas + campos)
+   =========================================================== */
+/* MODIFICACIÓN: Aumentamos el gap entre campos para "desamontonar" */
+.form-2col{ display:grid; gap:20px; } /* Aumentado de 20px a 24px */
+@media (max-width:1024px){ .form-2col{ grid-template-columns:1fr; } }
+.form-stack{ display:grid; gap:24px; } /* Aumentado de 20px a 24px */
+.fields-stack{ display:grid; gap:18px; } /* Aumentado de 16px a 18px */
+.side-col{ min-width:0; } 
+/* MODIFICACIÓN: Aseguramos padding para la tarjeta pegajosa */
+.sticky-card{ position:sticky; top:96px; padding: 16px; } 
+
+.fields-grid{ display:grid; gap:18px; grid-template-columns:1fr 1fr; }
+@media (max-width:820px){
+  .fields-grid{ grid-template-columns:1fr; }
+  .fields-grid .span-2{ grid-column:auto; }
+}
+
+/* Campo estándar con label y caption */
+.form-field{ display:flex; flex-direction:column; gap:6px; }
+.form-field .label{ font-weight:600; }
+.form-field .caption{ margin-top:4px; line-height:1.3; }
+
+/* Encabezados de sección en formularios */
+.section-title{ font-size:20px; font-weight:800; margin:0; }
+.section-subtitle{ font-size:16px; font-weight:700; margin:0; }
+
+/* Alertas */
+.alert-error-banner{
+  background:#fff1f1; color:#b3261e;
+  border:1px solid #f2c7c7; border-radius:12px; padding:12px 16px; margin-bottom: 20px;
+}
+/* ===========================================================
+   REVIEW TEXT (pantalla de edición de texto)
+   =========================================================== */
+.h1-tight { font-size: clamp(22px, 2.1vw, 30px); line-height:1.15; }
+
+.review-toolbar{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 12px; border-bottom:1px solid var(--ring); }
+.review-toolbar-left{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.ts-sm{ font-size:12.5px; } .pill-sm{ padding:4px 8px; font-size:12px; }
+.dot-sep{ color: var(--text-muted, #6b7280); }
+
+/* --- NUEVAS CLASES DE CHIPS CON COLORES ALT Y CONTORNO --- */
+/* Base para todos los chips de metadatos (borde/fondo suave) */
+.chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    border-radius: var(--radius-pill);
+    padding: 10px 10px;
+    margin-right: 5px;
+    font-weight: 700;
+    font-size: 12.5px;
+    /* Usar transición para que el hover se vea suave */
+    transition: all 0.2s ease;
+}
+.chip .label{ opacity:.85; }
+.chip .value{ font-weight:600; }
+.chip .trunc{ display:inline-block; max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; vertical-align:bottom; }
+@media (min-width:150px){ .chip .trunc{ max-width:150px; } }
+
+
+/* 1. ORG/INFO (ALT1) */
+.chip-info { 
+    background: color-mix(in oklab, var(--alt4) 18%, white 82%); 
+    color: color-mix(in oklab, var(--alt4) 65%, black 35%); 
+    border: 1px solid color-mix(in oklab, var(--alt4) 36%, white 64%); 
+}
+.chip-neutral{
+    background: color-mix(in oklab, var(--alt3) 18%, white 82%); 
+    color: color-mix(in oklab, var(--alt3) 65%, black 35%); 
+    border: 1px solid color-mix(in oklab, var(--alt3) 36%, white 64%); 
+}
+.chip-success{
+    background: color-mix(in oklab, var(--alt2) 18%, white 82%); 
+    color: color-mix(in oklab, var(--alt2) 65%, black 35%); 
+    border: 1px solid color-mix(in oklab, var(--alt2) 36%, white 64%); 
+}
+/* 2. PACIENTE (ALT2) */
+.chip-green { 
+    background: color-mix(in oklab, var(--alt2) 18%, white 82%); 
+    color: color-mix(in oklab, var(--alt2) 65%, black 35%); 
+    border: 1px solid color-mix(in oklab, var(--alt2) 36%, white 64%); 
+}
+
+/* 3. FUENTE (ALT3) */
+.chip-lilac { 
+    background: color-mix(in oklab, var(--alt3) 18%, white 82%); 
+    color: color-mix(in oklab, var(--alt3) 65%, black 35%); 
+    border: 1px solid color-mix(in oklab, var(--alt3) 36%, white 64%); 
+}
+
+/* 4. SESIÓN (Color neutro o ACCENT para distinción) */
+.chip-soft { 
+    background: var(--muted); 
+    color: var(--text); 
+    border: 1px solid var(--ring); 
+}
+
+/* 5. NOTA/ID (Usaremos ALT1 de nuevo, o PRIMARY para destacar) */
+.chip-id { 
+    background: color-mix(in oklab, var(--alt3) 18%, white 82%); 
+    color: color-mix(in oklab, var(--alt3) 65%, black 35%); 
+    border: 1px solid color-mix(in oklab, var(--alt3) 36%, white 64%); 
+}
+/* --- FIN NUEVAS CLASES --- */
+
+
+/* Área de la nota (textarea) con altura controlada */
+.note-area{
+  /* MODIFICADO: Usaremos una altura fija en lugar de clamp para mayor estabilidad en el layout */
+  min-height: 200px; 
+  max-height: 400px;
+  min-width: 400px;
+  max-width: 800px;
+  justify-content: center;
+  margin: 20px;
+  background: transparent;
+  padding: 14px 16px;
+  margin-left: 20%;
+  font-size: 15px; line-height: 1.5;
+  border-top-left-radius: 10; border-top-right-radius: 10; /* continuidad con toolbar */
+  resize: vertical; /* Permite redimensionar si es necesario */
+}
+
+/* Fila de chips con truncado para IDs largos */
+.chips-row{ display:flex; flex-wrap:wrap; gap:10px; margin-top:12px; } /* Aumentado el gap para separar los chips */
+.chip-sm{ padding:4px 8px; border-radius: var(--radius-pill); font-size:12.5px; }
+
+
+/* ===========================================================
+   MODALES (Audio/Imagen) + superficies hover
+   =========================================================== */
+.modal-root{ position:fixed; inset:0; z-index:60; display:flex; align-items:center; justify-content:center; }
+.modal-backdrop{ position:absolute; inset:0; background:rgba(0,0,0,.40); backdrop-filter:saturate(1.2) blur(1px); }
+.modal-card{
+  position:relative; width:100%; max-width:640px; margin:0 16px;
+  border-radius:var(--radius-card); background:var(--card); border:1px solid var(--ring);
+  box-shadow:0 20px 40px rgba(0,0,0,.25); overflow:hidden;
+  transition: box-shadow .15s ease, border-color .15s ease, transform .12s ease;
+}
+.hover-elevate:hover{ box-shadow:0 28px 72px rgba(0,0,0,.30); border-color: color-mix(in oklab, var(--primary) 24%, var(--ring)); transform:translateY(-1px); }
+
+.modal-header, .modal-footer{ display:flex; align-items:center; justify-content:space-between; padding:14px 20px; border-bottom:1px solid var(--ring); }
+.modal-footer{ border-top:1px solid var(--ring); border-bottom:none; }
+.modal-title{ margin:0; font-size:18px; font-weight:800; color:var(--text); }
+.modal-close{ background:transparent; border-color:transparent; }
+.modal-close:hover{ background: color-mix(in oklab, var(--muted) 60%, transparent); }
+.modal-body{ padding:20px; }
+
+/* Grabadora en modal de audio */
+.recorder-strip{
+  display:flex; align-items:center; justify-content:space-between; gap:12px;
+  padding:16px; border-radius:12px; background:var(--muted); border:1px solid var(--ring);
+  transition: background .15s ease, box-shadow .15s ease, border-color .15s ease;
+}
+.recorder-left{ display:flex; align-items:center; gap:10px; }
+.rec-status{ font-size:14px; }
+.rec-dot{ width:10px; height:10px; border-radius:9999px; background:rgba(0,0,0,.25); }
+.rec-dot.is-on{ background:var(--primary); box-shadow:0 0 0 6px rgba(0,0,0,.08); animation: recPulse 1100ms ease-in-out infinite; }
+@keyframes recPulse{
+  0%{ box-shadow:0 0 0 0 color-mix(in oklab, var(--primary) 24%, transparent); }
+  70%{ box-shadow:0 0 0 10px color-mix(in oklab, var(--primary) 0%, transparent); }
+  100%{ box-shadow:0 0 0 0 color-mix(in oklab, var(--primary) 0%, transparent); }
+}
+@media (prefers-reduced-motion: reduce){ .rec-dot.is-on{ animation:none; } }
+
+/* Bloque de selección de archivo en modales */
+.file-block{ margin-top:16px; padding-top:16px; border-top:1px solid var(--ring); }
+.hover-surface:hover{
+  background: color-mix(in oklab, var(--muted) 88%, var(--alt4)12%);
+  box-shadow: var(--elev-1);
+  border-color: color-mix(in oklab, var(--ring) 60%, var(--primary) 10%);
+}
+
+/* Superficie cámara inline (ImageCapture) */
+.cam-surface{ margin-top:10px; border:1px solid var(--ring); border-radius:12px; padding:12px; background:var(--muted); }
+.cam-grid{ display:grid; gap:12px; }
+.cam-video-wrap{ position:relative; border-radius:12px; overflow:hidden; }
+.cam-video{ width:100%; display:block; background:#0008; transition: transform .15s ease, box-shadow .15s ease; }
+.cam-video-wrap:hover .cam-video{ transform:scale(1.002); box-shadow:0 6px 24px rgba(0,0,0,.18); }
+.cam-overlay{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center; backdrop-filter:blur(1px); }
+.cam-actions{ display:flex; justify-content:flex-end; }
+
+/* ===========================================================
+   SETTINGS (Temas / Fuente demo)
+   =========================================================== */
+.settings-hero, .settings-section { background:var(--card); }
+.settings-actions { display:flex; gap:10px; flex-wrap:wrap; }
+.settings-grid{ display:grid; gap:50px; grid-template-columns: repeat(auto-fit, minmax(310px, 1fr)); }
+.option-card{
+  border:1px solid var(--ring); background:var(--card);
+  border-radius:var(--radius-card); padding:14px; cursor:pointer;
+  transition: transform .1s ease, box-shadow .15s ease, border-color .2s ease;
+}
+.option-card.selected{ border-color: color-mix(in oklab, var(--primary) 40%, white 60%); }
+.option-head{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px; }
+.option-title{ margin:0; font-weight:800; font-size:16px; }
+.badge{ display:inline-flex; align-items:center; justify-content:center; height:32px; padding:0 12px; border-radius:var(--radius-pill); border:1px solid var(--ring); background:transparent; color:var(--text); font-weight:700; }
+.badge.badge-on{ background:var(--primary); color:#fff; border-color:transparent; }
+.swatchRow{ display:flex; gap:8px; flex-wrap:wrap; }
+.swatch{ width:28px; height:28px; border-radius:50%; border:1px solid var(--ring); }
+
+.font-demo{ margin-top:14px; border:1px solid var(--ring); background: var(--surface-2); border-radius:12px; padding:12px; }
+.font-demo-title{ font-weight:700; margin-bottom:6px; }
+.font-demo-body{ opacity:.86; }
+
+
+/* ===========================================================
+   GENERATE PROGRESS NOTE – Layout compacto y consistente
+   =========================================================== */
+
+/* Contenedor principal de la página (ancho cómodo y padding) */
+.page-note {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: var(--space-4) var(--space-4);
+}
+
+/* Fila de KPIs / leyendas (chips arriba del formulario) */
+.kpi-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 28px;
+}
+
+/* Chip KPI base (usa colores del tema) */
+.kpi {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--ring);
+  background:   color-mix(in oklab, var(--alt3) 28%, white);
+  color: var(--text);
+  padding: 6px 12px;
+  border-radius: var(--radius-pill);
+  font-weight: 700;
+  font-size: 13px;
+  box-shadow: var(--elev-1);
+}
+.kpi .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--primary);
+}
+/* Variantes de color (como en el mock) */
+.kpi.brand   { background: color-mix(in oklab, var(--alt1) 28%, white); color:#0b1220; }
+.kpi.success { background: color-mix(in oklab, var(--alt4) 18%, white);      color:#0b1220; }
+
+/* Línea selector + botones a la derecha */
+.form-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: end;
+  margin-top: 18px;
+}
+.form-row .select { height: var(--h-input); } /* iguala altura de inputs */
+.btn-pill {
+  border-radius: var(--radius-pill);
+  height: var(--h-input);
+  padding: 0 28px;
+}
+.btn-pill:hover {
+    transform: translateY(-1px);
+    /* Usar sombra acentuada (alt3) para el hover */
+    box-shadow: 0 6px 12px color-mix(in srgb, var(--alt3) 35%, transparent);
+    /* Si quieres un contorno de color: */
+    border-color: color-mix(in oklab, var(--alt3) 60%, var(--ring)); 
+}
+/* Tarjetas de acción medianas (dos columnas) */
+.cards-2 {
+  display: grid;
+  gap: 18px;
+  margin-top: 32px;
+  grid-template-columns: 1fr 1fr;
+  align-items: stretch;
+}
+@media (max-width: 980px) {
+  .cards-2 { grid-template-columns: 1fr; }
+}
+
+/* Tarjeta mini (para acciones rápidas) */
+.mini-card {
+  background: var(--muted);
+  border: 1px solid var(--ring);
+  border-radius: var(--radius-card);
+  padding: 18px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  transition: transform .08s ease, box-shadow .15s ease, background .2s ease;
+  box-shadow: var(--elev-1);
+}
+.mini-card:hover { 
+    transform: translateY(-2px); 
+    box-shadow: 0 8px 20px color-mix(in srgb, var(--alt3) 35%, transparent); 
+}
+.mini-card.is-disabled { opacity: .55; pointer-events: none; }
+
+/* Badge redondo dentro de mini-card */
+.mini-card .icon-badge{
+  width: 60px;
+  height: 60px;
+  border-radius: 999px;
+  background: var(--card);
+  border: 1px solid var(--ring);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.mini-card .icon-badge .material-symbols-outlined { font-size: 28px; }
+
+/* CTA en pastilla (deshabilitado suave) */
+.btn-primary.is-disabled,
+button.is-disabled { opacity: .55; pointer-events: none; }
+.btn-primary.pill  { border-radius: var(--radius-pill); height: 46px; padding: 0 22px; margin-top: 20px; }
+.btn-primary.pill:hover {
+    transform: translateY(-1px);
+    /* Sombra acentuada ALT3 */
+    box-shadow: 0 6px 12px color-mix(in srgb, var(--alt3) 35%, transparent);
+}
+/* Tarjeta doctor compacta (avatar + nombre) */
+.doctor-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  margin-top: 20px;
+}
+.doctor-card img {
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+  object-fit: cover;
+}
+
+
+/* ===========================================================
+   LOGIN / PANTALLA DE AUTENTICACIÓN
+   =========================================================== */
+
+/* Contenedor principal de la pantalla */
+.login-container {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    
+    background-image: url('/public/login.png'); /* Usamos la ruta relativa a public */
+    background-size: cover;
+    background-position: center;
+    
+    background-color: var(--primary); /* Color base del header */
+    box-shadow: inset 0 0 0 2000px rgba(0, 0, 0, 0.5); /* Capa oscura semitransparente */
+    color: var(--header-text); /* Texto claro para todo el fondo */
+}
+
+/* Tarjeta principal (el formulario) */
+.login-card {
+    width: 100%;
+    max-width: 420px;
+    padding: 28px;
+    text-align: center;
+    background: color-mix(in srgb, var(--card) 65%, transparent);
+    color: var(--text); /* Restauramos el color de texto del tema para el interior */
+    box-shadow: var(--elev-3);
+    z-index: 10;
+}
+
+/* MODIFICACIÓN: Forzamos el texto de fondo (como la 'o' separadora) a ser claro */
+.login-container .caption.text-muted {
+    color: color-mix(in srgb, var(--header-text) 80%, transparent) !important;
+}
+.login-container .caption.text-muted + .caption.text-muted {
+    /* Mantiene el texto interior de la tarjeta oscuro */
+    color: var(--text) !important;
+}
+.login-container [style*="background:var(--ring)"] {
+    background: var(--header-text) !important; /* Líneas separadoras claras */
+}
+
+
+/* Avatar del logo */
+.login-avatar {
+    width: 72px; 
+    height: 72px; 
+    border-radius: 999px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 12px;
+    font-weight: 700;
+    
+    /* MODIFICACIÓN: Usa PRIMARY para el fondo del avatar/logo */
+    background: var(--primary);
+    color: var(--header-text); /* Texto claro */
+    box-shadow: var(--elev-2);
+}
+.login-avatar .material-symbols-outlined {
+    font-size: 40px; 
+}
+
+/* Botón de Google (temático, pero neutro para el logo) */
+.btn-google {
+    border: 1px solid var(--ring);
+    background: var(--card);
+    color: var(--text);
+    /* Aseguramos la disposición interna del botón de Google */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 3px;
+}
+.btn-google:hover {
+    /* MODIFICACIÓN: Hover con ALT1 suave */
+    filter: none;
+    transform: translateY(-1px);
+    box-shadow: var(--elev-accent);
+    background: color-mix(in oklab, var(--alt1) 20%, white 90%);
+    border-color: color-mix(in oklab, var(--alt1) 30%, var(--ring));
+}
+.btn-google img {
+    width: 20px;
+    height: 20px;
+    border-radius: 30px;
+}
+
+.login-card p.caption.text-muted {
+    font-weight: 700; 
+    opacity: 1; /* Asegura que no esté desvanecido */
+    color: #051639; /* Usa el color de texto principal */
+}

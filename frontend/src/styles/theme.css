@@ -1,0 +1,157 @@
+/* ===========================================================
+
+   DEFINICIÓN DE TEMAS (6 Temas)
+
+   =========================================================== */
+/* ====== ROLES BASE (fallback) ====== */
+:root {
+  /* Texto y fondos globales */
+  --bg: #f3f6fb;
+  --text: #0f172a;
+
+  /* VARIABLE AGREGADA para el tamaño de fuente base */
+  --font-size-base: 16px; 
+  /* Superficies */
+  --surface-1: #ffffff; /* cards/tiles */
+  --surface-2: #eff4fb; /* secciones suaves */
+  --surface-3: #e6eef8; /* contenedores destacados */
+
+  /* Header / Sidebar */
+  --header-bg: #0f1b2b;
+  --header-text: #e6eef8;
+  --sidebar-bg: #e9f0f8;
+  --sidebar-text: #0f172a;
+
+  /* Bordes/realces y paleta */
+  --ring: rgba(15,27,43,.18);
+  --primary: #0f1b2b;
+  --accent:  #33539E;
+  --alt1:    #7FACD6;
+  --alt2:    #BFB8DA;
+  --alt3:    #FEB7D4;
+  --alt4:    #CCABDB; 
+  --card: var(--surface-1);
+  --muted: var(--surface-2);
+}
+
+/* ===== THEME 1: COASTAL (azules, como tu captura) ===== */
+:root[data-theme="coastal"] {
+  --bg:#f3f6fb; --text:#082771;
+  --surface-1:#ffffff; --surface-2:#eff4fb; --surface-3:#e6eef8;
+  --header-bg:#33539E; --header-text:#e6eef8;
+  --sidebar-bg:#e9f0f8; --sidebar-text:#082771;
+  --ring: rgba(15,27,43,.18);
+  --primary:#33539E; 
+  --accent:#33539E; 
+  --alt1:#7FACD6; 
+  --alt2:#BFB8DA; 
+  --alt3:#FEB7D4; 
+  --alt4:#A5678E;
+  --card: var(--surface-1);
+  --muted: var(--surface-2);
+}
+
+/* ===== THEME 2: PASTEL (limpio, claro) ===== */
+:root[data-theme="pastel"] {
+  --bg:#fefdf9; --text:#88976a;
+  --surface-1:#ffffff; --surface-2:#fff8e9; --surface-3:#fff2dd;
+  --header-bg:#acc182; --header-text:#f2f6fb;
+  --sidebar-bg:#ebdec3; --sidebar-text:#88976a;
+  --ring: rgba(42,59,82,.16);
+  --primary:#CCABDB; 
+  --accent:#86E3CE; 
+  --alt1:#D0E6A5; 
+  --alt2:#FFDD94; 
+  --alt3:#FA897B; 
+  --alt4: #CCABDB;
+  --card: var(--surface-1);
+  --muted: var(--surface-2);
+}
+
+/* ===== THEME 3: WARM (neutros elegantes) ===== */
+:root[data-theme="warm"] {
+  --bg:#faf8f6; --text:#909B84;
+  --surface-1:#ffffff; --surface-2:#f3eee9; --surface-3:#ece5de;
+  --header-bg:#909B84; --header-text:#ffff;
+  --sidebar-bg:#efe7df; --sidebar-text:#909B84;
+  --ring: rgba(45,42,38,.15);
+  --primary:#B88F5B; 
+  --accent:#D0B7B3; 
+  --alt1:#F0E0DC; 
+  --alt2:#F9DDCF; 
+  --alt3:#909B84; 
+  --alt4: #CCABDB;
+  --card: var(--surface-1);
+  --muted: var(--surface-2);
+}
+/* ===== THEME 4: NEURON===== */
+:root[data-theme="neuron"] {
+  --primary: #94B447; 
+  --accent: #5B8A8A; 
+  --bg: #f8f9fa; 
+  --text: #5B8A8A; 
+  --header-bg: #3B5284; 
+  --header-text: #ffffff;
+  --sidebar-bg: #ffffff; 
+  --sidebar-text: #3B5284;
+  --ring: rgba(59, 82, 132, 0.25); 
+  --surface-1: #ffffff;
+  --surface-2: #eff4fa;
+  --surface-3: #e2e8f0;
+  --alt1: #CBE54E; 
+  --alt2: #94B447; 
+  --alt3: #5D6E1E; 
+  --alt4: #5B8A8A; 
+  --card: var(--surface-1);
+  --muted: var(--surface-2);
+}
+
+/* ===== THEME 5: AUTUMN (Naranjas/Amarillos de la segunda imagen) ===== */
+:root[data-theme="autumn"] {
+  /* Naranja principal, alto contraste */
+  --primary: #F28930; 
+  /* Mostaza/Amarillo, buen acento */
+  --accent: #E3AF38;
+  --bg: #fdfaf7; 
+  --text: #302008; /* Café oscuro para texto */
+  --header-bg: #E3AF38; 
+  --header-text: #302008;
+  --sidebar-bg: #f6e9d8; 
+  --sidebar-text: #302008;
+  --ring: rgba(242, 137, 48, 0.3); /* Anillos basados en Primary */
+  --surface-1: #ffffff;
+  --surface-2: #fef5ec;
+  --surface-3: #f9e9d6;
+  /* Paleta de la imagen */
+  --alt1: #F6A685; /* Coral suave */
+  --alt2: #E3AF38; /* Amarillo */
+  --alt3: #D0C2CF; /* Lila suave */
+  --alt4: #F6D3BD; /* Piel suave */
+  --card: var(--surface-1);
+  --muted: var(--surface-2);
+}
+
+/* ===== THEME 6: ROSE (Tonos Rojizos/Azules suaves de la tercera imagen) ===== */
+:root[data-theme="rose"] {
+  /* Rojo/Rsa oscuro como Primary */
+  --primary: #DE5B6D; 
+  /* Azul grisáceo para Header/Fondo */
+  --accent: #478BA2;
+  --bg: #fcf9f9; 
+  --text: #603a40; /* Tono oscuro de los rojos */
+  --header-bg: #478BA2; 
+  --header-text: #f0f9fa;
+  --sidebar-bg: #e6f0f5; 
+  --sidebar-text: #405a60;
+  --ring: rgba(222, 91, 109, 0.25); /* Anillos basados en Primary */
+  --surface-1: #ffffff;
+  --surface-2: #f5f8fb;
+  --surface-3: #e9f0f3;
+  /* Paleta de la imagen */
+  --alt1: #E9765B; /* Terracota */
+  --alt2: #F2A490; /* Melocotón */
+  --alt3: #B9D4DB; /* Azul muy claro */
+  --alt4: #478BA2; /* Azul grisáceo */
+  --card: var(--surface-1);
+  --muted: var(--surface-2);
+}
