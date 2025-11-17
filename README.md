@@ -1,17 +1,25 @@
 ## Levantamiento de servicios:
+#Activar venv
+.\.venv\Scripts\activate
+
 # OCR (puerto 8002)
-uvicorn OCR:app --host 0.0.0.0 --port 8002 --reload
+uvicorn ocr:app --host 0.0.0.0 --port 8003 --reload
 
 
 # Análisis (puerto 8001)
-uvicorn Analysis:app --host 0.0.0.0 --port 8001 --reload
+uvicorn analysis:app --host 0.0.0.0 --port 8001 --reload
 
 
 # Transcriptor de audio (puerto 8003)
-uvicorn Audio_transcriber:app --host 0.0.0.0 --port 8003 --reload
+uvicorn audio_transcriber:app --host 0.0.0.0 --port 8002 --reload
 
 # in /backend/orquestador
 uvicorn orchestrator:app --host 0.0.0.0 --port 8080 --reload
+
+# Frontend 
+cd frontend
+npm run dev
+
 
 
 Pruebas rápidas
