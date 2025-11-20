@@ -6,8 +6,16 @@ from datetime import datetime
 from typing import Any, Dict, Optional
 from pathlib import Path
 import io
+import logging # <-- AÑADIDO
 
-from fastapi import FastAPI, File, UploadFile, HTTPException, Header, Form, Depends, Request
+# --- NUEVAS IMPORTACIONES PARA PDF/FIRMA ---
+import weasyprint
+import hashlib
+import html
+
+from fastapi import (
+    FastAPI, File, UploadFile, HTTPException, Header, Form, Depends, Request, Body
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import StreamingResponse
@@ -17,27 +25,41 @@ import httpx
 import firebase_admin
 from firebase_admin import credentials, auth
 from google.cloud import firestore
+from google.cloud import storage, bigquery # <-- AÑADIDO
 from starlette.responses import PlainTextResponse
 
-from fpdf import FPDF
-
 # ──────────────────────────────────────────────────────────────────────────────
-# Firebase Admin init (seguro para Cloud Run: sin JSON si no existe)
+# Configuración de logging (AÑADIDO)
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Firebase Admin init (Tu lógica original)
 def _init_firebase_admin_once():
     try:
         firebase_admin.get_app()
+        logger.info("Firebase Admin ya estaba inicializado.") # Log añadido
     except ValueError:
         path = "serviceAccountKey.json"
         if os.path.exists(path):
             cred = credentials.Certificate(path)
             firebase_admin.initialize_app(cred)
+            logger.info("Firebase Admin inicializado con serviceAccountKey.json.") # Log añadido
         else:
             firebase_admin.initialize_app()  # ADC (Workload Identity / SA de Cloud Run)
+            logger.info("Firebase Admin inicializado con Application Default Credentials (ADC).") # Log añadido
 
 _init_firebase_admin_once()
 
-# INICIALIZACIÓN DE FIRESTORE
-db = firestore.Client()
+GCS_BUCKET_ENV = os.getenv("GCS_BUCKET_NAME", "terapia-471517.appspot.com") 
+try:
+    db = firestore.Client()
+    storage_client = storage.Client()
+    bq_client = bigquery.Client()
+    BUCKET_NAME = GCS_BUCKET_ENV # Usa la variable de entorno
+    logger.info(f"Clientes de Google Cloud (Firestore, Storage, BigQuery) inicializados. Bucket: {BUCKET_NAME}")
+except Exception as e:
+    logger.error(f"Error inicializando clientes de Google Cloud: {e}")
+    raise
 
 security = HTTPBearer()
 
@@ -49,94 +71,57 @@ async def get_current_user(cred: HTTPAuthorizationCredentials = Depends(security
         decoded = auth.verify_id_token(token)
         return decoded  # incluye 'uid', 'email', etc.
     except Exception as e:
+        logger.warning(f"Token inválido o expirado: {e}") # Log mejorado
         raise HTTPException(status_code=401, detail=f"Token inválido: {e}")
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Microservice URLs (env or defaults)
-OCR_URL       = (
+# Microservice URLs (Tu lógica original)
+OCR_URL = (
     os.getenv("ORC_OCR_URL")
     or os.getenv("ORCH_OCR_URL")
     or "https://ocr-826777844588.us-central1.run.app/ocr"
 )
-ANALYSIS_URL  = (
+ANALYSIS_URL = (
     os.getenv("ORC_ANALYSIS_URL")
     or os.getenv("ORCH_ANALYSIS_URL")
     or "https://analisis-826777844588.us-central1.run.app/analizar_emociones"
 )
-AUDIO_URL     = (
+AUDIO_URL = (
     os.getenv("ORC_AUDIO_URL")
     or os.getenv("ORCH_AUDIO_URL")
     or "https://audio-826777844588.us-central1.run.app/transcribir_audio"
 )
 
-# Timeouts
+# Timeouts (Tu lógica original)
 CONNECT_TIMEOUT = float(os.getenv("ORC_CONNECT_TIMEOUT", "10"))
-READ_TIMEOUT    = float(os.getenv("ORC_READ_TIMEOUT", "120"))
+READ_TIMEOUT = float(os.getenv("ORC_READ_TIMEOUT", "120"))
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Fuentes DejaVu (Docker + local dev)
-DEJAVU_REGULAR_CANDIDATES = [
-    "/usr/local/share/fonts/truetype/app/DejaVuSans.ttf",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    "/app/DejaVuSans.ttf",
-    "DejaVuSans.ttf",
-]
-DEJAVU_BOLD_CANDIDATES = [
-    "/usr/local/share/fonts/truetype/app/DejaVuSans-Bold.ttf",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-    "/app/DejaVuSans-Bold.ttf",
-    "DejaVuSans-Bold.ttf",
-]
 
-def _first_existing_path(candidates) -> Optional[str]:
-    for p in candidates:
-        if Path(p).exists():
-            return p
-    return None
-
-def register_dejavu(pdf: FPDF) -> bool:
-    """Registra DejaVu en FPDF si las TTF están disponibles. Devuelve True si se registró."""
-    reg = _first_existing_path(DEJAVU_REGULAR_CANDIDATES)
-    bold = _first_existing_path(DEJAVU_BOLD_CANDIDATES)
-    if not reg or not bold:
-        print(f"[WARN] Fuentes DejaVu no encontradas. regular={reg} bold={bold}")
-        return False
-    try:
-        pdf.add_font("DejaVu", "", reg, uni=True)
-        pdf.add_font("DejaVu", "B", bold, uni=True)
-        print(f"[INFO] DejaVu registrado: regular={reg}, bold={bold}")
-        return True
-    except Exception as e:
-        print(f"[WARN] Falló el registro de DejaVu: {e}")
-        return False
-
-# Cortar secuencias sin espacios (URLs, tokens, base64) para que quepan en multi_cell
-def soften_unbreakables(s: str, chunk: int = 60) -> str:
-    if not s:
-        return ""
-    return re.sub(
-        r"(\S{" + str(chunk) + r",})",
-        lambda m: "\n".join(textwrap.wrap(m.group(1), chunk)),
-        s,
-    )
-
-# ──────────────────────────────────────────────────────────────────────────────
 app = FastAPI(title="Orquestador (Foto→OCR→Análisis | Audio→Transcripción→Análisis)")
 #FRONTEND_ORIGIN = ["https://frontend-826777844588.us-central1.run.app"]
-FRONTEND_ORIGIN = "http://localhost:5173/"
+ALLOWED_ORIGINS = [
+    "http://localhost:5173", # Puerto de Vite (Desarrollo)
+    "http://127.0.0.1:5173", # Variación de localhost
+    "http://localhost:8080", # El propio orquestador
+    "http://127.0.0.1:8080",
+    # --- AÑADE TU URL DE PRODUCCIÓN DE CLOUD RUN AQUÍ ---
+    "https://frontend-826777844588.us-central1.run.app"
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=FRONTEND_ORIGIN,
-    allow_origin_regex=r"https?://localhost(:\d+)?$",
+    # Usamos la lista explícita para la seguridad
+    allow_origins=ALLOWED_ORIGINS, 
+    # Mantenemos las opciones de seguridad necesarias para la autenticación
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["*"],
-    max_age=600,
+    allow_methods=["*"], 
+    allow_headers=["*"], # Necesario para enviar el token 'Authorization'
 )
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Schemas
+# Schemas (Tu lógica original)
+
 class OrquestacionFotoRespuesta(BaseModel):
     mensaje: str
     user_id: Optional[str]
@@ -163,16 +148,26 @@ class GuardarNotaOut(BaseModel):
     note_id: str
     analisis: Dict[str, Any]
 
-class GenerarReporteIn(BaseModel):
+# --- NUEVO SCHEMA PARA PDF SOAP (AÑADIDO) ---
+class DoctorSOAPInput(BaseModel):
+    """
+    Modelo de entrada para la nota SOAP que el doctor escribe
+    en el frontend. El frontend debe enviar un JSON con esta estructura.
+    """
+    subjetivo: str
+    observacion_clinica: str
+    analisis: str
+    plan: str
+
+class FinalizarSesionPayload(BaseModel):
+    """
+    Este es el Body (JSON) completo que el frontend enviará
+    para finalizar la sesión.
+    """
     org_id: str
     patient_id: str
-    session_id: str
-    note_id: str
-    evolution_note: str  # Nota del doctor
-    baseline_text: str   # Texto de OCR/Audio
-    analysis: Optional[Dict[str, Any]] = None  # JSON de emociones
+    soap_input: DoctorSOAPInput
 
-# ──────────────────────────────────────────────────────────────────────────────
 async def _save_note_to_firestore(
     db_client,
     org_id: str,
@@ -180,8 +175,8 @@ async def _save_note_to_firestore(
     patient_id: str,
     session_id: str,
     note_id: str,
-    note_type: str,       # "image" | "audio" | "text"
-    source_type: str,     # "upload" | "gcs_uri" | "final"
+    note_type: str,      # "image" | "audio" | "text"
+    source_type: str,    # "upload" | "gcs_uri" | "final"
     source_gcs_uri: Optional[str],
     text_content: str,
     analysis_result: dict,
@@ -211,8 +206,228 @@ async def _save_note_to_firestore(
         except Exception:
             pass
         note_ref.set(note_data)
+        logger.info(f"Nota de IA guardada en Firestore: {note_ref.path}") # Log mejorado
     except Exception as e:
-        print(f"[WARN] Firestore write failed for note {note_id}: {e}")
+        logger.warning(f"[WARN] Firestore write failed for note {note_id}: {e}")
+
+def _timestamp() -> str:
+    return datetime.now().strftime("%Y%m%d_%H%M%S")
+
+def build_forward_headers(authorization: Optional[str], uid: Optional[str]) -> Dict[str, str]:
+    headers: Dict[str, str] = {}
+    if authorization:
+        headers["Authorization"] = authorization
+    if uid:
+        headers["X-User-Id"] = uid
+    return headersimport os
+import re
+import textwrap
+import uuid
+# --- CORRECCIÓN 1: Importar 'timezone' explícitamente ---
+from datetime import datetime, timezone
+from typing import Any, Dict, Optional
+from pathlib import Path
+import io
+import logging
+
+import weasyprint
+import hashlib
+import html
+
+from fastapi import (
+    FastAPI, File, UploadFile, HTTPException, Header, Form, Depends, Request, Body
+)
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+import httpx
+
+import firebase_admin
+from firebase_admin import credentials, auth
+from google.cloud import firestore
+from google.cloud import storage, bigquery
+from starlette.responses import PlainTextResponse
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Configuración de logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Firebase Admin init
+def _init_firebase_admin_once():
+    try:
+        firebase_admin.get_app()
+        logger.info("Firebase Admin ya estaba inicializado.")
+    except ValueError:
+        path = "serviceAccountKey.json"
+        if os.path.exists(path):
+            cred = credentials.Certificate(path)
+            firebase_admin.initialize_app(cred)
+            logger.info("Firebase Admin inicializado con serviceAccountKey.json.")
+        else:
+            firebase_admin.initialize_app()  # ADC
+            logger.info("Firebase Admin inicializado con Application Default Credentials (ADC).")
+
+_init_firebase_admin_once()
+
+GCS_BUCKET_ENV = os.getenv("GCS_BUCKET_NAME", "terapia-471517.appspot.com") 
+try:
+    db = firestore.Client()
+    storage_client = storage.Client()
+    bq_client = bigquery.Client()
+    BUCKET_NAME = GCS_BUCKET_ENV
+    logger.info(f"Clientes de Google Cloud (Firestore, Storage, BigQuery) inicializados. Bucket: {BUCKET_NAME}")
+except Exception as e:
+    logger.error(f"Error inicializando clientes de Google Cloud: {e}")
+    raise
+
+security = HTTPBearer()
+
+async def get_current_user(cred: HTTPAuthorizationCredentials = Depends(security)):
+    if not cred:
+        raise HTTPException(status_code=401, detail="Falta el token de autorización")
+    try:
+        token = cred.credentials
+        decoded = auth.verify_id_token(token)
+        return decoded
+    except Exception as e:
+        logger.warning(f"Token inválido o expirado: {e}")
+        raise HTTPException(status_code=401, detail=f"Token inválido: {e}")
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Microservice URLs
+OCR_URL = (
+    os.getenv("ORC_OCR_URL")
+    or os.getenv("ORCH_OCR_URL")
+    or "https://ocr-826777844588.us-central1.run.app/ocr"
+)
+ANALYSIS_URL = (
+    os.getenv("ORC_ANALYSIS_URL")
+    or os.getenv("ORCH_ANALYSIS_URL")
+    or "https://analisis-826777844588.us-central1.run.app/analizar_emociones"
+)
+AUDIO_URL = (
+    os.getenv("ORC_AUDIO_URL")
+    or os.getenv("ORCH_AUDIO_URL")
+    or "https://audio-826777844588.us-central1.run.app/transcribir_audio"
+)
+
+# Timeouts
+CONNECT_TIMEOUT = float(os.getenv("ORC_CONNECT_TIMEOUT", "10"))
+READ_TIMEOUT = float(os.getenv("ORC_READ_TIMEOUT", "120"))
+
+# ──────────────────────────────────────────────────────────────────────────────
+
+app = FastAPI(title="Orquestador (Foto→OCR→Análisis | Audio→Transcripción→Análisis)")
+
+# --- CORRECCIÓN 2: Configuración CORS Robusta ---
+ALLOWED_ORIGINS = [
+    "http://localhost:5173", 
+    "http://127.0.0.1:5173",
+    "http://localhost:8080",
+    "http://127.0.0.1:8080",
+    "https://frontend-826777844588.us-central1.run.app"
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOWED_ORIGINS, 
+    allow_credentials=True,
+    allow_methods=["*"], 
+    allow_headers=["*"],
+)
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Schemas
+
+class OrquestacionFotoRespuesta(BaseModel):
+    mensaje: str
+    user_id: Optional[str]
+    note_id: str
+    ocr: Dict[str, Any]
+    analisis: Optional[Dict[str, Any]] = None
+
+class OrquestacionAudioRespuesta(BaseModel):
+    mensaje: str
+    user_id: Optional[str]
+    note_id: str
+    transcripcion: Dict[str, Any]
+    analisis: Optional[Dict[str, Any]] = None
+
+class GuardarNotaIn(BaseModel):
+    org_id: str
+    patient_id: str
+    session_id: str
+    note_id: str
+    texto: str
+
+class GuardarNotaOut(BaseModel):
+    mensaje: str
+    note_id: str
+    analisis: Dict[str, Any]
+
+class DoctorSOAPInput(BaseModel):
+    """
+    Modelo de entrada para la nota SOAP.
+    """
+    subjetivo: str
+    observacion_clinica: str
+    analisis: str
+    plan: str
+
+class FinalizarSesionPayload(BaseModel):
+    """
+    Body JSON completo para finalizar sesión.
+    """
+    org_id: str
+    patient_id: str
+    soap_input: DoctorSOAPInput
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Funciones de BD
+
+async def _save_note_to_firestore(
+    db_client,
+    org_id: str,
+    doctor_uid: str,
+    patient_id: str,
+    session_id: str,
+    note_id: str,
+    note_type: str,
+    source_type: str,
+    source_gcs_uri: Optional[str],
+    text_content: str,
+    analysis_result: dict,
+):
+    if not db_client:
+        return
+    try:
+        note_ref = (
+            db_client.collection("orgs").document(org_id)
+            .collection("doctors").document(doctor_uid)
+            .collection("patients").document(patient_id)
+            .collection("sessions").document(session_id)
+            .collection("notes").document(note_id)
+        )
+        note_data = {
+            "note_id": note_id,
+            "type": note_type,
+            "source": source_type,
+            "gcs_uri_source": source_gcs_uri,
+            "ocr_text": text_content,
+            "emotions": (analysis_result or {}).get("resultado", {}),
+            "status_pipeline": "done",
+        }
+        try:
+            note_data["created_at"] = firestore.SERVER_TIMESTAMP
+            note_data["processed_at"] = firestore.SERVER_TIMESTAMP
+        except Exception:
+            pass
+        note_ref.set(note_data)
+        logger.info(f"Nota de IA guardada en Firestore: {note_ref.path}")
+    except Exception as e:
+        logger.warning(f"[WARN] Firestore write failed for note {note_id}: {e}")
 
 def _timestamp() -> str:
     return datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -226,124 +441,708 @@ def build_forward_headers(authorization: Optional[str], uid: Optional[str]) -> D
     return headers
 
 # ──────────────────────────────────────────────────────────────────────────────
-@app.post("/generar_reporte_pdf")
-async def generar_reporte_pdf(
-    payload: GenerarReporteIn,
+# Funciones Auxiliares PDF
+
+def formatear_analisis_html(analisis: dict) -> str:
+    if not analisis:
+        return "<p>No hay datos de análisis disponibles.</p>"
+
+    html_output = "<ul>"
+    try:
+        sorted_emociones = sorted(
+            analisis.items(), 
+            key=lambda item: item[1].get('porcentaje', 0), 
+            reverse=True
+        )
+    except Exception:
+        return f"<p>Error al formatear análisis: {html.escape(str(analisis))}</p>"
+
+    for emocion, data in sorted_emociones:
+        if isinstance(data, dict):
+            porcentaje = data.get('porcentaje', 0) * 100
+            entidades = data.get('entidades', [])
+            ents_str = ", ".join(entidades) if entidades else 'N/A'
+            linea = f"<strong>{html.escape(emocion.capitalize())}</strong>: {porcentaje:.1f}% (Entidades: {html.escape(ents_str)})"
+            html_output += f"<li>{linea}</li>"
+        else:
+            linea = f"<strong>{html.escape(emocion.capitalize())}</strong>: {data*100:.1f}%"
+            html_output += f"<li>{linea}</li>"
+
+    html_output += "</ul>"
+    if len(sorted_emociones) == 0:
+        return "<p>No se detectaron emociones.</p>"
+
+    return html_output
+
+# ──────────────────────────────────────────────────────────────────────────────
+# ENDPOINTS
+
+@app.get("/health")
+def health():
+    return {"ok": True, "ts": _timestamp()}
+
+@app.options("/{full_path:path}")
+async def preflight_catch_all(full_path: str, request: Request):
+    return PlainTextResponse("", status_code=204)
+
+# FOTO → OCR → ANÁLISIS
+@app.post("/orquestar_foto", response_model=OrquestacionFotoRespuesta)
+async def orquestar_foto(
+    file: UploadFile = File(None),
+    gcs_uri: Optional[str] = Form(default=None),
+    patient_id: str = Form(...),
+    session_id: str = Form(...),
+    org_id: str = Form(...),
+    analyze_now: bool = Form(default=False),
     current_user: dict = Depends(get_current_user),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    effective_user_id = current_user.get("uid")
+    if not file and not gcs_uri:
+        raise HTTPException(status_code=400, detail="Envía 'file' o 'gcs_uri'.")
+
+    note_id = str(uuid.uuid4())
+    downstream_form = {
+        "org_id": org_id,
+        "patient_id": patient_id,
+        "session_id": session_id,
+        "note_id": note_id,
+    }
+    headers = build_forward_headers(authorization, effective_user_id)
+
+    async with httpx.AsyncClient(timeout=httpx.Timeout(READ_TIMEOUT, connect=CONNECT_TIMEOUT)) as client:
+        if file is not None:
+            file_bytes = await file.read()
+            if not file_bytes:
+                raise HTTPException(status_code=400, detail="Archivo vacío o no válido.")
+            files = {"file": (file.filename or "upload.bin", file_bytes, file.content_type or "application/octet-stream")}
+            ocr_resp = await client.post(OCR_URL, files=files, data=downstream_form, headers=headers)
+        else:
+            form = {**downstream_form, "gcs_uri": gcs_uri}
+            ocr_resp = await client.post(OCR_URL, data=form, headers=headers)
+
+        if ocr_resp.status_code >= 400:
+            raise HTTPException(status_code=ocr_resp.status_code, detail=f"OCR error: {ocr_resp.text}")
+        ocr_json = ocr_resp.json()
+
+        analysis_json = None
+        if analyze_now:
+            texto_detectado = (ocr_json.get("resultado", {}).get("texto") or "").strip()
+            an_payload = {**downstream_form, "texto": texto_detectado}
+            an_resp = await client.post(ANALYSIS_URL, json=an_payload, headers=headers)
+            if an_resp.status_code >= 400:
+                raise HTTPException(status_code=an_resp.status_code, detail=f"Análisis error: {an_resp.text}")
+            analysis_json = an_resp.json()
+
+        if analysis_json:
+            source_gcs_uri = ocr_json.get("imagen_gcs") if file else gcs_uri
+            await _save_note_to_firestore(
+                db_client=db,
+                org_id=org_id,
+                doctor_uid=effective_user_id,
+                patient_id=patient_id,
+                session_id=session_id,
+                note_id=note_id,
+                note_type="image",
+                source_type="upload" if file else "gcs_uri",
+                source_gcs_uri=source_gcs_uri,
+                text_content=(ocr_json.get("resultado", {}).get("texto") or ""),
+                analysis_result=analysis_json,
+            )
+
+    return {
+        "mensaje": "OCR listo" if not analyze_now else "Pipeline completado (foto)",
+        "user_id": effective_user_id,
+        "note_id": note_id,
+        "ocr": ocr_json,
+        "analisis": analysis_json,
+    }
+
+# AUDIO → TRANSCRIPCIÓN → ANÁLISIS
+@app.post("/orquestar_audio", response_model=OrquestacionAudioRespuesta)
+async def orquestar_audio(
+    file: UploadFile = File(None),
+    gcs_uri: Optional[str] = Form(default=None),
+    patient_id: str = Form(...),
+    session_id: str = Form(...),
+    org_id: str = Form(...),
+    analyze_now: bool = Form(default=False),
+    current_user: dict = Depends(get_current_user),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    effective_user_id = current_user.get("uid")
+    if not file and not gcs_uri:
+        raise HTTPException(status_code=400, detail="Envía 'file' o 'gcs_uri'.")
+
+    note_id = str(uuid.uuid4())
+    downstream_form = { "org_id": org_id, "patient_id": patient_id, "session_id": session_id, "note_id": note_id }
+    
+    # --- CORRECCIÓN 3: nombre de variable corregido (effective_id -> effective_user_id) ---
+    headers = build_forward_headers(authorization, effective_user_id)
+
+    async with httpx.AsyncClient(timeout=httpx.Timeout(READ_TIMEOUT, connect=CONNECT_TIMEOUT)) as client:
+        if file is not None:
+            file_bytes = await file.read()
+            if not file_bytes:
+                raise HTTPException(status_code=400, detail="Archivo vacío o no válido.")
+            files = {"file": (file.filename or "audio.bin", file_bytes, file.content_type or "audio/mpeg")}
+            tr_resp = await client.post(AUDIO_URL, files=files, data=downstream_form, headers=headers)
+        else:
+            form = {**downstream_form, "gcs_uri": gcs_uri}
+            tr_resp = await client.post(AUDIO_URL, data=form, headers=headers)
+
+        if tr_resp.status_code >= 400:
+            raise HTTPException(status_code=tr_resp.status_code, detail=f"Audio error: {tr_resp.text}")
+        tr_json = tr_resp.json()
+
+        analysis_json = None
+        if analyze_now:
+            texto = (tr_json.get("resultado", {}).get("texto") or "").strip()
+            an_payload = {**downstream_form, "texto": texto}
+            an_resp = await client.post(ANALYSIS_URL, json=an_payload, headers=headers)
+            if an_resp.status_code >= 400:
+                raise HTTPException(status_code=an_resp.status_code, detail=f"Análisis error: {an_resp.text}")
+            analysis_json = an_resp.json()
+
+        if analysis_json:
+            source_gcs_uri = tr_json.get("audio_gcs") if file else gcs_uri
+            await _save_note_to_firestore(
+                db_client=db,
+                org_id=org_id,
+                doctor_uid=effective_user_id,
+                patient_id=patient_id,
+                session_id=session_id,
+                note_id=note_id,
+                note_type="audio",
+                source_type="upload" if file else "gcs_uri",
+                source_gcs_uri=source_gcs_uri,
+                text_content=(tr_json.get("resultado", {}).get("texto") or ""),
+                analysis_result=analysis_json,
+            )
+
+    return {
+        "mensaje": "Transcripción lista" if not analyze_now else "Pipeline completado (audio)",
+        "user_id": effective_user_id,
+        "note_id": note_id,
+        "transcripcion": tr_json,
+        "analisis": analysis_json,
+    }
+
+@app.post("/guardar_nota", response_model=GuardarNotaOut)
+async def guardar_nota(
+    payload: GuardarNotaIn,
+    current_user: dict = Depends(get_current_user),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    effective_user_id = current_user.get("uid")
+    headers = build_forward_headers(authorization, effective_user_id)
+
+    an_payload = {
+        "texto": payload.texto,
+        "org_id": payload.org_id,
+        "patient_id": payload.patient_id,
+        "session_id": payload.session_id,
+        "note_id": payload.note_id,
+    }
+    async with httpx.AsyncClient(timeout=httpx.Timeout(READ_TIMEOUT, connect=CONNECT_TIMEOUT)) as client:
+        an_resp = await client.post(ANALYSIS_URL, json=an_payload, headers=headers)
+        if an_resp.status_code >= 400:
+            raise HTTPException(status_code=an_resp.status_code, detail=f"Análisis error: {an_resp.text}")
+        analysis_json = an_resp.json()
+
+    await _save_note_to_firestore(
+        db_client=db,
+        org_id=payload.org_id,
+        doctor_uid=effective_user_id,
+        patient_id=payload.patient_id,
+        session_id=payload.session_id,
+        note_id=payload.note_id,
+        note_type="text",
+        source_type="final",
+        source_gcs_uri=None,
+        text_content=payload.texto,
+        analysis_result=analysis_json,
+    )
+
+    return {"mensaje": "Nota guardada y analizada", "note_id": payload.note_id, "analisis": analysis_json}
+
+# ENDPOINT DE FIRMA Y PDF
+@app.post("/sesion/finalizar_y_firmar/{session_id}")
+async def finalizar_y_firmar_sesion(
+    session_id: str,
+    payload: FinalizarSesionPayload = Body(...),
+    current_user: dict = Depends(get_current_user)
 ):
     doctor_uid = current_user.get("uid")
+    if not doctor_uid:
+        raise HTTPException(status_code=403, detail="UID de doctor no encontrado")
 
+    org_id = payload.org_id
+    patient_id = payload.patient_id
+    soap_input = payload.soap_input
+
+    logger.info(f"Iniciando finalización de sesión: {session_id}")
+    
     try:
-        # --- Fase 1: Firestore ---
-        print("DEBUG: Obteniendo datos de Firestore...")
-        doc_ref = db.collection("orgs").document(payload.org_id) \
-                    .collection("doctors").document(doctor_uid)
-        doc_snap = doc_ref.get()
-        doctor_data = doc_snap.to_dict() if doc_snap.exists else {}
+        # Firestore Lookups
+        doctor_ref = db.collection("orgs").document(org_id).collection("doctors").document(doctor_uid)
+        doctor_doc = doctor_ref.get()
+        if not doctor_doc.exists:
+            raise HTTPException(status_code=404, detail="Doctor no encontrado")
+        datos_doctor = doctor_doc.to_dict() or {}
+        datos_doctor_formato = {
+            "nombre_completo": datos_doctor.get("name", "N/A"),
+            "cedula": datos_doctor.get("cedula", "N/A")
+        }
 
-        pat_ref = db.collection("orgs").document(payload.org_id) \
-                    .collection("doctors").document(doctor_uid) \
-                    .collection("patients").document(payload.patient_id)
-        pat_snap = pat_ref.get()
-        patient_data = pat_snap.to_dict() if pat_snap.exists else {}
-        print("DEBUG: Datos de Firestore obtenidos.")
+        patient_ref = doctor_ref.collection("patients").document(patient_id)
+        patient_doc = patient_ref.get()
+        if not patient_doc.exists:
+            raise HTTPException(status_code=404, detail="Paciente no encontrado")
+        datos_paciente = patient_doc.to_dict() or {}
+        datos_paciente_formato = {
+            "display_code": datos_paciente.get("display_code", "N/A"),
+            "fullName": datos_paciente.get("fullName", "N/A"), 
+            "age": datos_paciente.get("age", "N/A"),
+            "id": patient_id
+        }
 
-        # --- Fase 2: PDF ---
-        print("DEBUG: Inicializando FPDF y fuentes...")
-        pdf = FPDF()
-        pdf.set_auto_page_break(auto=True, margin=15)  # evita desbordes verticales
-        fonts_ok = register_dejavu(pdf)
+        # IA Notes
+        session_ref = patient_ref.collection("sessions").document(session_id)
+        notes_collection = session_ref.collection("notes").order_by(
+            "created_at", direction=firestore.Query.DESCENDING
+        ).limit(1).stream()
+        
+        datos_ia_procesados = {
+            "origen": "N/A",
+            "texto_completo": "No se procesaron notas de IA.",
+            "analisis_sentimiento": {}
+        }
+        for note in notes_collection:
+            note_data = note.to_dict() or {}
+            datos_ia_procesados["origen"] = note_data.get("type", "N/A").capitalize()
+            datos_ia_procesados["texto_completo"] = note_data.get("ocr_text", "Texto no extraído.")
+            datos_ia_procesados["analisis_sentimiento"] = note_data.get("emotions", {})
+            break
+            
+    except Exception as e:
+        logger.error(f"Error Firestore: {e}")
+        raise HTTPException(status_code=500, detail=f"Error lectura BD: {e}")
 
-        pdf.add_page()
-        if fonts_ok:
-            pdf.set_font("DejaVu", size=16)
-        else:
-            pdf.set_font("Arial", size=16)
+    # PDF Gen
+    try:
+        # --- CORRECCIÓN 1: Uso correcto de timezone ---
+        timestamp_firma = datetime.now(timezone.utc)
+        
+        analisis_ia_html = formatear_analisis_html(datos_ia_procesados['analisis_sentimiento'])
 
-        # Título
-        pdf.cell(0, 10, txt="Reporte de Nota de Evolución", ln=True, align="C")
+        html_content = f"""
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <style>
+                @page {{ margin: 1in; }}
+                body {{ 
+                    font-family: "DejaVu Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+                    font-size: 11pt; line-height: 1.5;
+                }}
+                h1 {{ font-size: 18pt; text-align: center; border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 30px; }}
+                h2 {{ font-size: 14pt; color: #000; border-bottom: 1px solid #eee; padding-bottom: 5px; }}
+                h3 {{ font-size: 12pt; color: #444; font-weight: 700; }}
+                .header-info {{ font-size: 9pt; color: #555; line-height: 1.6; margin-bottom: 20px; padding: 10px; border: 1px solid #eee; border-radius: 5px; }}
+                .header-info p {{ margin: 0; }}
+                .section {{ margin-bottom: 15px; }}
+                .ia-data-block {{ background-color: #f9f9f9; border: 1px solid #eee; border-radius: 5px; padding: 10px 15px; margin-top: 10px; }}
+                .ia-data-block h4 {{ margin-top: 0; font-size: 11pt; color: #111; }}
+                .ia-data-block blockquote {{ font-style: italic; color: #333; border-left: 3px solid #ccc; padding-left: 10px; margin-left: 0; font-size: 10.5pt; }}
+                .ia-analysis-item {{ font-size: 10pt; color: #222; }}
+                .ia-analysis-item ul {{ margin-top: 5px; }}
+                .firma-block {{ margin-top: 50px; border-top: 1px solid #aaa; padding-top: 10px; font-size: 9pt; color: #666; }}
+                .firma-block p {{ margin: 3px 0; }}
+            </style>
+        </head>
+        <body>
+            <h1>NOTA DE EVOLUCIÓN</h1>
+            <div class="header-info">
+                <p><strong>Establecimiento:</strong> {html.escape(org_id)}</p>
+                <p><strong>Médico/Especialista:</strong> {html.escape(datos_doctor_formato['nombre_completo'])} (Cédula: {html.escape(datos_doctor_formato['cedula'])})</p>
+                <p><strong>Fecha de Sesión:</strong> {timestamp_firma.strftime('%Y-%m-%d')}</p>
+                <p><strong>Hora de Elaboración:</strong> {timestamp_firma.strftime('%H:%M:%S %Z')}</p>
+                <p><strong>Paciente:</strong> {html.escape(datos_paciente_formato['fullName'])} (ID: {html.escape(datos_paciente_formato['id'])}) (Edad: {datos_paciente_formato['age']})</p>
+            </div>
 
-        if fonts_ok:
-            pdf.set_font("DejaVu", size=12)
-        else:
-            pdf.set_font("Arial", size=12)
+            <h2>II. Cuerpo de la Nota (Modelo SOAP)</h2>
+            <div class="section"><h3>S: Subjetivo</h3><p>{html.escape(soap_input.subjetivo)}</p></div>
+            <div class="section">
+                <h3>O: Objetivo</h3>
+                <p><strong>Observación Clínica:</strong> {html.escape(soap_input.observacion_clinica)}</p>
+                <div class="ia-data-block">
+                    <h4>Datos de IA (Fuente: {html.escape(datos_ia_procesados['origen'])})</h4>
+                    <p><strong>Texto Extraído:</strong></p>
+                    <blockquote>"{html.escape(datos_ia_procesados['texto_completo'])}"</blockquote>
+                    <hr style="border:0; border-top: 1px dashed #ccc; margin: 15px 0;">
+                    {analisis_ia_html}
+                </div>
+            </div>
+            <div class="section"><h3>A: Análisis</h3><p>{html.escape(soap_input.analisis)}</p></div>
+            <div class="section"><h3>P: Plan</h3><p>{html.escape(soap_input.plan)}</p></div>
 
-        # Datos del Doctor (usar ancho 0 = ancho restante de línea)
-        pdf.cell(0, 10, txt=f"Doctor: {str(doctor_data.get('name', 'N/A'))}", ln=True)
-        pdf.cell(0, 10, txt=f"Cédula: {str(doctor_data.get('cedula', 'N/A'))}", ln=True)
-        pdf.cell(0, 10, txt=f"Organización: {str(payload.org_id)}", ln=True)
+            <h2>III. Certificación de Firma Electrónica</h2>
+            <div class="firma-block">
+                <p><strong>Nota cerrada y firmada electrónicamente por:</strong> {html.escape(datos_doctor_formato['nombre_completo'])}</p>
+                <p><strong>Doctor UID:</strong> {html.escape(doctor_uid)}</p>
+                <p><strong>Sello de Tiempo:</strong> {timestamp_firma.isoformat()}</p>
+                <p><strong>Huella Digital (Hash):</strong> <span style="font-size: 8pt;">(Se calculará)</span></p>
+            </div>
+        </body>
+        </html>
+        """
 
-        # Paciente
-        pdf.cell(0, 10, txt=f"Paciente: {str(patient_data.get('fullName', 'N/A'))}", ln=True)
-        pdf.cell(0, 10, txt=f"Edad: {str(patient_data.get('age', 'N/A'))}", ln=True)
-        pdf.cell(0, 10, txt=f"Sesión ID: {str(payload.session_id)}", ln=True)
-        pdf.ln(5)
-
-        # Nota del médico
-        if fonts_ok:
-            pdf.set_font("DejaVu", "B", size=14)
-        else:
-            pdf.set_font("Arial", "B", size=14)
-        pdf.cell(0, 10, txt="Nota de Evolución (Médico)", ln=True)
-
-        if fonts_ok:
-            pdf.set_font("DejaVu", size=12)
-        else:
-            pdf.set_font("Arial", size=12)
-
-        note_txt = soften_unbreakables(str(payload.evolution_note))
-        pdf.multi_cell(0, 5, txt=note_txt)
-        pdf.ln(3)
-
-        # Análisis
-        if fonts_ok:
-            pdf.set_font("DejaVu", "B", size=14)
-        else:
-            pdf.set_font("Arial", "B", size=14)
-        pdf.cell(0, 10, txt="Análisis de Emociones", ln=True)
-
-        if fonts_ok:
-            pdf.set_font("DejaVu", size=12)
-        else:
-            pdf.set_font("Arial", size=12)
-
-        if payload.analysis and payload.analysis.get('resultado'):
-            for emocion, data in payload.analysis['resultado'].items():
-                ents = ", ".join(data.get('entidades', []))
-                line = f"- {str(emocion).capitalize()}: {str(data.get('porcentaje', 0))}% (Entidades: {ents or 'N/A'})"
-                pdf.multi_cell(0, 5, txt=soften_unbreakables(line))
-        else:
-            pdf.multi_cell(0, 5, txt="No se realizó análisis.")
-        pdf.ln(3)
-
-        # Texto de referencia (OCR/Audio)
-        if fonts_ok:
-            pdf.set_font("DejaVu", "B", size=14)
-        else:
-            pdf.set_font("Arial", "B", size=14)
-        pdf.cell(0, 10, txt="Texto de Referencia (Extraído)", ln=True)
-
-        if fonts_ok:
-            pdf.set_font("DejaVu", "", size=10)
-        else:
-            pdf.set_font("Arial", "", size=10)
-
-        base_txt = soften_unbreakables(str(payload.baseline_text or "N/A"))
-        pdf.multi_cell(0, 5, txt=base_txt)
-
-        # Salida
-        pdf_string = pdf.output(dest='S')  # str (latin-1)
-        pdf_bytes = pdf_string.encode('latin-1', errors='ignore')
-
-        return StreamingResponse(
-            io.BytesIO(pdf_bytes),
-            media_type="application/pdf",
-            headers={"Content-Disposition": f"attachment; filename=Nota_{payload.note_id}.pdf"}
-        )
+        logger.info("Generando PDF y Hash...")
+        pdf_bytes = weasyprint.HTML(string=html_content).write_pdf()
+        document_hash = hashlib.sha256(pdf_bytes).hexdigest()
+        
+        html_content_firmado = html_content.replace('(Se calculará)', document_hash)
+        pdf_bytes = weasyprint.HTML(string=html_content_firmado).write_pdf()
 
     except Exception as e:
-        print(f"ERROR DETALLADO: {e}")
-        raise HTTPException(status_code=500, detail=f"Error generando PDF: {e}")
+        logger.error(f"Error PDF Gen: {e}")
+        raise HTTPException(status_code=500, detail=f"Error WeasyPrint: {e}")
+
+    # Guardar
+    try:
+        gcs_path = f"{org_id}/{doctor_uid}/{patient_id}/sessions/{session_id}/derived/evolution/evolution_note_{session_id}.pdf"
+        bucket = storage_client.bucket(BUCKET_NAME)
+        blob = bucket.blob(gcs_path)
+        blob.upload_from_string(pdf_bytes, content_type='application/pdf')
+        gcs_uri = f"gs://{BUCKET_NAME}/{gcs_path}"
+
+        note_txt_completa = f"S: {soap_input.subjetivo}\nO: {soap_input.observacion_clinica}\nA: {soap_input.analisis}\nP: {soap_input.plan}"
+        datos_firma = {
+            "evolution_note_md_uri": gcs_uri,
+            "evolution_note_txt": note_txt_completa,
+            "status_pipeline": "done",
+            "signed_at_ts": timestamp_firma,
+            "signature_method": "firma_simple_terappia",
+            "document_hash": document_hash
+        }
+        session_ref.update(datos_firma)
+        logger.info(f"Sesión {session_id} finalizada.")
+
+    except Exception as e:
+        logger.error(f"Error guardado: {e}")
+        raise HTTPException(status_code=500, detail=f"Error guardado: {e}")
+
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"inline; filename=Nota_{session_id}.pdf"}
+    )
+
+# ──────────────────────────────────────────────────────────────────────────────
+# --- NUEVA FUNCIÓN AUXILIAR DE PDF (AÑADIDO) ---
+
+def formatear_analisis_html(analisis: dict) -> str:
+    """
+    Función auxiliar para convertir el JSON de análisis de sentimientos
+    en un HTML legible y bien formateado para el PDF.
+    
+    *** ADAPTADA AL FORMATO DE TU MICROSERVICIO ORIGINAL ***
+    (Asume que 'analisis' es el objeto guardado en 'emotions' en Firestore,
+     que es igual al 'resultado' del microservicio de análisis)
+    """
+    if not analisis:
+        return "<p>No hay datos de análisis disponibles.</p>"
+
+    html_output = "<ul>"
+    
+    # Ordenar emociones por 'porcentaje' (de mayor a menor)
+    try:
+        sorted_emociones = sorted(
+            analisis.items(), 
+            key=lambda item: item[1].get('porcentaje', 0), 
+            reverse=True
+        )
+    except Exception:
+        # Si el formato es incorrecto, solo lo muestra
+        return f"<p>Error al formatear análisis: {html.escape(str(analisis))}</p>"
+
+    # Itera sobre el formato: {"tristeza": {"porcentaje": 0.5, "entidades": [...]}}
+    for emocion, data in sorted_emociones:
+        if isinstance(data, dict):
+            porcentaje = data.get('porcentaje', 0) * 100
+            entidades = data.get('entidades', [])
+            ents_str = ", ".join(entidades) if entidades else 'N/A'
+            
+            linea = f"<strong>{html.escape(emocion.capitalize())}</strong>: {porcentaje:.1f}% (Entidades: {html.escape(ents_str)})"
+            html_output += f"<li>{linea}</li>"
+        else:
+            # Fallback por si el formato es simple {"tristeza": 0.5}
+            linea = f"<strong>{html.escape(emocion.capitalize())}</strong>: {data*100:.1f}%"
+            html_output += f"<li>{linea}</li>"
+
+    html_output += "</ul>"
+    
+    # Si no se encontraron emociones válidas
+    if len(sorted_emociones) == 0:
+        return "<p>No se detectaron emociones.</p>"
+
+    return html_output
+
+# --- NUEVO ENDPOINT DE GENERACIÓN DE NOTA DE EVOLUCIÓN (PDF) (AÑADIDO) ---
+
+@app.post("/sesion/finalizar_y_firmar/{session_id}")
+async def finalizar_y_firmar_sesion(
+    payload: FinalizarSesionPayload = Body(...),
+    current_user: dict = Depends(get_current_user) # Adaptado a tu auth
+):
+    """
+    Finaliza una sesión, genera la Nota de Evolución (PDF) con la entrada
+    SOAP del doctor, la "firma" (Hash) y la almacena en GCS y Firestore,
+    cumpliendo con la NOM-004.
+    
+    Este endpoint es una ACCIÓN FINAL separada de /guardar_nota.
+    """
+    doctor_uid = current_user.get("uid") # Adaptado a tu auth
+    if not doctor_uid:
+        raise HTTPException(status_code=403, detail="UID de doctor no encontrado en el token")
+
+    logger.info(f"Iniciando finalización de sesión: {session_id} por doctor: {doctor_uid}")
+    
+    try:
+        # --- PASO 1: OBTENER DATOS REALES DE FIRESTORE ---
+        
+        # Obtener datos del Doctor
+        doctor_ref = db.collection("orgs").document(org_id).collection("doctors").document(doctor_uid)
+        doctor_doc = doctor_ref.get()
+        if not doctor_doc.exists:
+            logger.warning(f"Doctor no encontrado: {doctor_uid} en org {org_id}")
+            raise HTTPException(status_code=404, detail="Doctor no encontrado")
+        datos_doctor = doctor_doc.to_dict() or {}
+        datos_doctor_formato = {
+            "nombre_completo": datos_doctor.get("name", "N/A"),
+            "cedula": datos_doctor.get("cedula", "N/A") # Asumiendo campo 'cedula'
+        }
+
+        # Obtener datos del Paciente
+        patient_ref = doctor_ref.collection("patients").document(patient_id)
+        patient_doc = patient_ref.get()
+        if not patient_doc.exists:
+            logger.warning(f"Paciente no encontrado: {patient_id}")
+            raise HTTPException(status_code=404, detail="Paciente no encontrado")
+        datos_paciente = patient_doc.to_dict() or {}
+        datos_paciente_formato = {
+            "display_code": datos_paciente.get("display_code", "N/A"),
+            "fullName": datos_paciente.get("fullName", "N/A"), # Usando campos de tu PDF anterior
+            "age": datos_paciente.get("age", "N/A"),
+            "id": patient_id
+        }
+
+        # --- PASO 2: OBTENER DATOS DE IA DE LA SESIÓN (DE FIRESTORE) ---
+        session_ref = patient_ref.collection("sessions").document(session_id)
+        
+        # Buscamos la *última* nota de IA guardada (la de /guardar_nota)
+        notes_collection = session_ref.collection("notes").order_by(
+            "created_at", direction=firestore.Query.DESCENDING
+        ).limit(1).stream()
+        
+        datos_ia_procesados = {
+            "origen": "N/A",
+            "texto_completo": "No se procesaron notas de IA para esta sesión.",
+            "analisis_sentimiento": {}
+        }
+        
+        for note in notes_collection:
+            note_data = note.to_dict() or {}
+            datos_ia_procesados["origen"] = note_data.get("type", "N/A").capitalize()
+            datos_ia_procesados["texto_completo"] = note_data.get("ocr_text", "Texto no extraído.")
+            # Lee el campo 'emotions' que tu función _save_note_to_firestore guardó
+            datos_ia_procesados["analisis_sentimiento"] = note_data.get("emotions", {})
+            break
+            
+    except Exception as e:
+        logger.error(f"Error al leer datos de Firestore para sesión {session_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Error al leer datos de Firestore: {e}")
+
+    # --- PASO 3: ENSAMBLAR HTML Y GENERAR PDF ---
+    try:
+        timestamp_firma = datetime.now(datetime.timezone.utc)
+        # Formatear el análisis usando la NUEVA función adaptada
+        analisis_ia_html = formatear_analisis_html(datos_ia_procesados['analisis_sentimiento'])
+
+        # Plantilla HTML (Usa fuentes DejaVu del Dockerfile)
+        html_content = f"""
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <style>
+                @page {{ margin: 1in; }}
+                body {{ 
+                    font-family: "DejaVu Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+                    font-size: 11pt; line-height: 1.5;
+                }}
+                h1 {{ 
+                    font-size: 18pt; text-align: center; border-bottom: 2px solid #000; 
+                    padding-bottom: 10px; margin-bottom: 30px;
+                }}
+                h2 {{ 
+                    font-size: 14pt; color: #000; border-bottom: 1px solid #eee;
+                    padding-bottom: 5px;
+                }}
+                h3 {{ font-size: 12pt; color: #444; font-weight: 700; }}
+                .header-info {{ 
+                    font-size: 9pt; color: #555; line-height: 1.6;
+                    margin-bottom: 20px; padding: 10px;
+                    border: 1px solid #eee; border-radius: 5px;
+                }}
+                .header-info p {{ margin: 0; }}
+                .section {{ margin-bottom: 15px; }}
+                .ia-data-block {{
+                    background-color: #f9f9f9; border: 1px solid #eee;
+                    border-radius: 5px; padding: 10px 15px; margin-top: 10px;
+                }}
+                .ia-data-block h4 {{ margin-top: 0; font-size: 11pt; color: #111; }}
+                .ia-data-block blockquote {{
+                    font-style: italic; color: #333; border-left: 3px solid #ccc;
+                    padding-left: 10px; margin-left: 0; font-size: 10.5pt;
+                }}
+                .ia-analysis-item {{ font-size: 10pt; color: #222; }}
+                .ia-analysis-item ul {{ margin-top: 5px; }}
+                .firma-block {{ 
+                    margin-top: 50px; border-top: 1px solid #aaa; 
+                    padding-top: 10px; font-size: 9pt; color: #666;
+                }}
+                .firma-block p {{ margin: 3px 0; }}
+            </style>
+        </head>
+        <body>
+            <h1>NOTA DE EVOLUCIÓN</h1>
+
+            <div class="header-info">
+                <p><strong>Establecimiento:</strong> {html.escape(org_id)}</p>
+                <p><strong>Médico/Especialista:</strong> {html.escape(datos_doctor_formato['nombre_completo'])} (Cédula: {html.escape(datos_doctor_formato['cedula'])})</p>
+                <p><strong>Fecha de Sesión:</strong> {timestamp_firma.strftime('%Y-%m-%d')}</p>
+                <p><strong>Hora de Elaboración:</strong> {timestamp_firma.strftime('%H:%M:%S %Z')}</p>
+                <p><strong>Paciente:</strong> {html.escape(datos_paciente_formato['fullName'])} (ID: {html.escape(datos_paciente_formato['id'])}) (Edad: {datos_paciente_formato['age']})</p>
+            </div>
+
+            <h2>II. Cuerpo de la Nota (Modelo SOAP)</h2>
+
+            <div class="section">
+                <h3>S: Subjetivo (Lo que el paciente expresa)</h3>
+                <p>{html.escape(soap_input.subjetivo)}</p>
+            </div>
+
+            <div class="section">
+                <h3>O: Objetivo (Datos observables y generados por TerappIA)</h3>
+                <p><strong>Observación Clínica:</strong> {html.escape(soap_input.observacion_clinica)}</p>
+                
+                <div class="ia-data-block">
+                    <h4>Datos de IA (Fuente: {html.escape(datos_ia_procesados['origen'])})</h4>
+                    <p><strong>Texto Extraído:</strong></p>
+                    <blockquote>"{html.escape(datos_ia_procesados['texto_completo'])}"</blockquote>
+                    <hr style="border:0; border-top: 1px dashed #ccc; margin: 15px 0;">
+                    
+                    <h4>Análisis de Emociones (sobre texto extraído)</h4>
+                    <div class="ia-analysis-item">
+                        {analisis_ia_html}
+                    </div>
+                </div>
+            </div>
+
+            <div class="section">
+                <h3>A: Análisis / Evaluación (Interpretación Clínica)</h3>
+                <p>{html.escape(soap_input.analisis)}</p>
+            </div>
+
+            <div class="section">
+                <h3>P: Plan (Tratamiento y Próximos Pasos)</h3>
+                <p>{html.escape(soap_input.plan)}</p>
+            </div>
+
+            <h2>III. Certificación de Firma Electrónica</h2>
+            <div class="firma-block">
+                <p><strong>Nota cerrada y firmada electrónicamente por:</strong> {html.escape(datos_doctor_formato['nombre_completo'])}</p>
+                <p><strong>Doctor UID (Atribución):</strong> {html.escape(doctor_uid)}</p>
+                <p><strong>Sello de Tiempo (Integridad):</strong> {timestamp_firma.isoformat()}</p>
+                <p><strong>Huella Digital (Hash) del Documento:</strong> <span style="font-size: 8pt; word-wrap: break-word;">(Se calculará y guardará)</span></p>
+            </div>
+        </body>
+        </html>
+        """
+
+        # Generar PDF y Hash
+        logger.info("Generando PDF y Hash...")
+        pdf_bytes = weasyprint.HTML(string=html_content).write_pdf()
+        document_hash = hashlib.sha256(pdf_bytes).hexdigest()
+        
+        # Actualizar el HTML con el Hash real ANTES de la regeneración final
+        html_content_firmado = html_content.replace(
+            '<span style="font-size: 8pt; word-wrap: break-word;">(Se calculará y guardará)</span>',
+            f'<span style="font-size: 8pt; word-wrap: break-word;">{document_hash}</span>'
+        )
+        pdf_bytes = weasyprint.HTML(string=html_content_firmado).write_pdf() # Regenerar con el hash
+
+    except Exception as e:
+        logger.error(f"Error al generar el PDF para sesión {session_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Error al generar el PDF: {e}")
+
+    # -----------------------------------------------------
+    # PASO 4: GUARDAR EN GCS, FIRESTORE Y (opcional) BIGQUERY
+    # -----------------------------------------------------
+    try:
+        # 1. Guardar PDF en GCS
+        gcs_path = f"{org_id}/{doctor_uid}/{patient_id}/sessions/{session_id}/derived/evolution/evolution_note_{session_id}.pdf"
+        bucket = storage_client.bucket(BUCKET_NAME)
+        blob = bucket.blob(gcs_path)
+        blob.upload_from_string(pdf_bytes, content_type='application/pdf')
+        gcs_uri = f"gs://{BUCKET_NAME}/{gcs_path}"
+        logger.info(f"PDF guardado en GCS: {gcs_uri}")
+
+        # 2. Actualizar Documento de Sesión en Firestore
+        note_txt_completa = f"S: {soap_input.subjetivo}\nO: {soap_input.observacion_clinica}\nA: {soap_input.analisis}\nP: {soap_input.plan}"
+        
+        datos_firma = {
+            "evolution_note_md_uri": gcs_uri, # El nombre del campo dice MD pero guardamos PDF
+            "evolution_note_txt": note_txt_completa,
+            "status_pipeline": "done", # Marcamos la sesión como completada
+            "signed_at_ts": timestamp_firma,
+            "signature_method": "firma_simple_terappia",
+            "document_hash": document_hash
+        }
+        
+        # Usamos update() para añadir estos campos al documento de sesión existente
+        session_ref.update(datos_firma)
+        logger.info(f"Documento de sesión {session_id} actualizado en Firestore.")
+
+        # 3. (Opcional) Guardar en BigQuery
+        # BQ_DATASET = os.environ.get("BQ_DATASET", "tu_dataset") # Necesitas definir esto
+        # BQ_TABLE_EVOLUTION = f"{bq_client.project}.{BQ_DATASET}.evolution_notes"
+        
+        # bq_row = {
+        #     "session_id": session_id, "patient_id": patient_id, "doctor_uid": doctor_uid,
+        #     "org_id": org_id, "ds": timestamp_firma.date(),
+        #     "note_md_uri": gcs_uri, "note_txt": note_txt_completa,
+        #     "signed_at_ts": timestamp_firma.isoformat(), "document_hash": document_hash,
+        #     "created_ts": timestamp_firma.isoformat()
+        # }
+        # errors = bq_client.insert_rows_json(BQ_TABLE_EVOLUTION, [bq_row])
+        # if errors:
+        #     logger.error(f"Errores al insertar en BigQuery: {errors}")
+        # else:
+        #     logger.info("Datos de evolución insertados en BigQuery.")
+
+    except Exception as e:
+        logger.error(f"Error al guardar datos en GCS/Firestore para sesión {session_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Error al guardar datos en GCS/Firestore: {e}")
+
+    # Devuelve el PDF directamente para revisión/descarga
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"inline; filename=Nota_{session_id}.pdf"}
+    )
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 @app.get("/health")
@@ -352,7 +1151,6 @@ def health():
 
 @app.options("/{full_path:path}")
 async def preflight_catch_all(full_path: str, request: Request):
-    # 204 sin validar nada; CORSMiddleware inyecta los headers CORS
     return PlainTextResponse("", status_code=204)
 
 # FOTO → OCR → ANÁLISIS
@@ -405,7 +1203,7 @@ async def orquestar_foto(
                 raise HTTPException(status_code=an_resp.status_code, detail=f"Análisis error: {an_resp.text}")
             analysis_json = an_resp.json()
 
-        # Persistimos si ya analizamos
+        # Persistimos si ya analizamos (Tu lógica original de 'if analysis_json:')
         if analysis_json:
             source_gcs_uri = ocr_json.get("imagen_gcs") if file else gcs_uri
             await _save_note_to_firestore(
@@ -475,6 +1273,7 @@ async def orquestar_audio(
                 raise HTTPException(status_code=an_resp.status_code, detail=f"Análisis error: {an_resp.text}")
             analysis_json = an_resp.json()
 
+        # Persistimos si ya analizamos (Tu lógica original de 'if analysis_json:')
         if analysis_json:
             source_gcs_uri = tr_json.get("audio_gcs") if file else gcs_uri
             await _save_note_to_firestore(
@@ -522,7 +1321,7 @@ async def guardar_nota(
             raise HTTPException(status_code=an_resp.status_code, detail=f"Análisis error: {an_resp.text}")
         analysis_json = an_resp.json()
 
-    # 2) Persistir en Firestore
+    # 2) Persistir en Firestore 
     await _save_note_to_firestore(
         db_client=db,
         org_id=payload.org_id,
