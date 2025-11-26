@@ -7,45 +7,48 @@ import { doc, getDoc, collection, query, orderBy, limit, getDocs } from "firebas
 
 import AppLayout from "../components/AppLayout";
 import LoadingOverlay from "../components/LoadingOverlay";
-import { BASE, finalizarSesionYGenerarNota } from "../services/orchestrator";
+import { finalizarSesionYGenerarNota } from "../services/orchestrator";
 
-// Componente para manejar los campos SOAP
-const SoapTextarea = ({ label, id, value, onChange, placeholder = "Escribe aquí la nota..." }) => (
-  <div className="mb-6">
-    <label htmlFor={id} className="h4 block mb-2 font-semibold">
-      {label}
-    </label>
-    <textarea
-      id={id}
-      name={id}
-      rows={4}
-      className="form-control w-full p-3 border border-gray-300 rounded-xl shadow-sm"
-      value={value}
-      onChange={onChange}
-      placeholder={placeholder}
-      style={{minHeight:100}}
-    />
-  </div>
-);
-
-// Componente para mostrar mensajes (reemplaza alert)
+// --------------------------- UI helpers ---------------------------
 const MessageBox = ({ message, type }) => {
-  const baseClasses = "p-4 rounded-xl my-4";
-  const typeClasses = {
+  const base = "p-4 rounded-xl my-4";
+  const t = {
     error: "bg-red-100 border border-red-400 text-red-700",
     success: "bg-green-100 border border-green-400 text-green-700",
+    info: "bg-blue-50 border border-blue-200 text-blue-700",
   };
-  return (
-    <div className={`${baseClasses} ${typeClasses[type] || 'bg-gray-100'}`} role="alert">
-      <p>{message}</p>
-    </div>
-  );
+  return <div className={`${base} ${t[type] || "bg-gray-100"}`} role="alert"><p>{message}</p></div>;
 };
-
 
 function readSessionCtx() {
   try { return JSON.parse(sessionStorage.getItem("currentSession") || "{}"); } catch { return {}; }
 }
+
+// Fila SOAP: label + textarea en grid
+const SoapRow = ({
+  shortTag,               // "S.", "O.", "A.", "P."
+  longLabel,              // Texto largo (aclaración)
+  name, value, onChange,
+  placeholder,
+  rows = 6
+}) => (
+  <div className="soap-row">
+    <div className="soap-label">
+      <div className="soap-tag">{shortTag}</div>
+      <div className="soap-long">{longLabel}</div>
+    </div>
+    <div className="soap-field">
+      <textarea
+        name={name}
+        rows={rows}
+        className="soap-textarea"
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
+      />
+    </div>
+  </div>
+);
 
 export default function PatientProgressNoteOverview() {
   const navigate = useNavigate();
@@ -63,24 +66,107 @@ export default function PatientProgressNoteOverview() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [saving, setSaving] = useState(false);
-  const [evolutionNote, setEvolutionNote] = useState("");
-  
-  // --- ESTADO LOCAL PARA LOS CAMPOS SOAP ---
+
+  // SOAP
   const [soapForm, setSoapForm] = useState({
-    subjetivo: '',
-    observacion_clinica: '', // Añadido
-    analisis: '',           // Añadido
-    plan: '',               // Añadido
+    subjetivo: "",
+    observacion_clinica: "",
+    analisis: "",
+    plan: "",
   });
   const [successPdfUrl, setSuccessPdfUrl] = useState(null);
-  // --- FIN ESTADO SOAP ---
+
   const [showAnalysisJSON, setShowAnalysisJSON] = useState(false);
   const handleSoapChange = (e) => {
     const { name, value } = e.target;
-    setSoapForm(prev => ({ ...prev, [name]: value }));
+    setSoapForm((prev) => ({ ...prev, [name]: value }));
   };
 
+  // ---------- estilos responsivos locales ----------
+  const pageCSS = `
+    .page-wrap{ padding:16px; overflow-x:hidden; }
+    .card-note{
+      padding:20px; border-radius:16px;
+      background:var(--card-bg,#fff);
+      box-shadow:var(--shadow-lg,0 2px 10px rgba(0,0,0,.06));
+      position:relative; overflow:hidden;
+    }
+    /* Asegura que TODO mida con border-box (evita 1–2px de desborde) */
+    .card-note, .card-note *{ box-sizing:border-box; }
 
+    .chips{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:12px; }
+    .chip{ display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border-radius:999px; font-size:13px; background:#f5f7fb; color:#223; }
+    .chip-info{ background:#e8f1ff; color:#114; }
+    .chip-success{ background:#e7f7ec; color:#123; }
+    .chip-neutral{ background:#f3f4f6; color:#223; }
+
+    .section-title{ font-weight:900; font-size:22px; margin:0 0 10px 0; }
+    .section-sub{ margin-bottom:6px; color:var(--text-muted,#667085); font-size:13px; }
+    .muted-box{ background:#f7f9fc; color:#475569; border:1px solid #e5e7eb; border-radius:12px; padding:14px; }
+
+    /* --------- GRID SOAP ---------- */
+    .soap-grid{
+      width:100%;
+      display:grid;
+      grid-template-columns: 230px 1fr;
+      gap:12px 18px;
+      align-items:start;
+    }
+    .soap-row{ display:contents; }
+    .soap-label{
+      display:flex; align-items:center; gap:10px; padding-top:6px;
+      min-width:0; /* clave para que no empuje el grid */
+    }
+    .soap-tag{ font-weight:900; color:#0a2a63; min-width:26px; }
+    .soap-long{ color:#0a2a63; font-weight:700; line-height:1.25; }
+
+    .soap-field{ width:100%; min-width:0; } /* <-- evita overflow horizontal */
+    .soap-textarea{
+      display:block;
+      width:100%; max-width:100%; min-height:120px;
+      resize:vertical;
+      padding:12px 14px; border-radius:14px;
+      border:1px solid #dbe2ee; outline:none;
+      font-size:14px; line-height:1.45; background:#fff;
+      box-shadow:0 1px 0 rgba(0,0,0,0.02);
+      background-clip:padding-box; /* evita “sangrado” del borde en Safari */
+    }
+    .soap-textarea::placeholder{ color:#a0a6b1; }
+
+    .footer-ctas{ display:flex; justify-content:center; gap:12px; margin-top:24px; flex-wrap:wrap; }
+
+    /* --------- Tablet --------- */
+    @media (max-width:1024px){
+      .soap-grid{ grid-template-columns: 180px 1fr; gap:10px 14px; }
+      .section-title{ font-size:20px; }
+    }
+
+    /* --------- Móvil --------- */
+    @media (max-width:640px){
+      .page-wrap{ padding:12px; }
+      .card-note{ padding:12px; border-radius:14px; }
+      .chips{ gap:6px; }
+      .chip{ font-size:12px; padding:5px 8px; }
+
+      .section-title{ font-size:18px; }
+      .muted-box{ padding:10px; }
+
+      .soap-grid{ grid-template-columns: 1fr; gap:8px; }
+      .soap-label{ padding-top:2px; }
+      .soap-tag{ min-width:auto; }
+      .soap-long{ font-size:13px; }
+
+      /* ↓↓↓ reduce tipografía y paddings en móvil */
+      .soap-textarea{
+        min-height:110px;
+        font-size:12.5px; line-height:1.4;
+        padding:10px 12px;
+      }
+    }
+  `;
+
+
+  // ---------- carga de datos ----------
   useEffect(() => {
     let alive = true;
     async function loadAll() {
@@ -91,141 +177,73 @@ export default function PatientProgressNoteOverview() {
           const pSnap = await getDoc(pRef);
           if (alive) setPatient(pSnap.exists() ? { id: pSnap.id, ...pSnap.data() } : null);
         }
-        
-        // Carga la última nota de IA para referencia
         if (user?.uid && orgId && patientId && sessionId) {
           const notesQuery = query(
-            collection(db, 'orgs', orgId, 'doctors', user.uid, 'patients', patientId, 'sessions', sessionId, 'notes'),
-            orderBy('created_at', 'desc'),
+            collection(db, "orgs", orgId, "doctors", user.uid, "patients", patientId, "sessions", sessionId, "notes"),
+            orderBy("created_at", "desc"),
             limit(1)
           );
-
-          const querySnapshot = await getDocs(notesQuery);
-          if (alive && !querySnapshot.empty) {
-            setNote({ id: querySnapshot.docs[0].id, ...querySnapshot.docs[0].data() });
-          } else {
-             // Si noteId existe pero no hay nota, se usará la que está en el estado de location
-             setNote(null);
-          }
+          const qs = await getDocs(notesQuery);
+          if (alive && !qs.empty) setNote({ id: qs.docs[0].id, ...qs.docs[0].data() });
+          else if (alive) setNote(null);
         }
       } catch (e) {
         console.error(e);
         if (alive) setErr("No se pudo cargar la nota/paciente.");
-      } finally {
-        if (alive) setLoading(false);
-      }
+      } finally { if (alive) setLoading(false); }
     }
     loadAll(); return () => { alive = false; };
   }, [user?.uid, orgId, patientId, sessionId, noteId]);
 
-  const { emotions, entities, analysisRaw, analysisSource } = useMemo(() => {
+  // ---------- normalización de análisis ----------
+  const { emotions, analysisRaw, analysisSource } = useMemo(() => {
     const rawFromState = state?.analisis ?? null;
     const rawFromFS = note?.emotions ?? null;
     const raw = rawFromState ?? rawFromFS ?? null;
     const source = rawFromState ? "estado anterior" : rawFromFS ? "Firestore" : "ninguno";
     const resultado = raw?.resultado ?? raw ?? null;
-    const normPct = (v) => (v==null||isNaN(v)) ? null : (Number(v)<=1?Math.round(Number(v)*100):Math.round(Number(v)));
-    let emos = [], ents = [];
+
+    const pct = (v) => (v==null||isNaN(v)) ? null : (Number(v)<=1?Math.round(Number(v)*100):Math.round(Number(v)));
+    let emos = [];
+
     if (resultado && typeof resultado === "object" && !Array.isArray(resultado)) {
       const entries = Object.entries(resultado);
-      const looks = entries.every(([,v]) => v && typeof v === "object" && ("porcentaje" in v || "entidades" in v));
+      const looks = entries.every(([,v]) => v && typeof v === "object");
       if (looks) {
-        emos = entries.map(([label,obj])=>({label, pct:normPct(obj?.porcentaje), ents:Array.isArray(obj?.entidades)?obj.entidades:[]}));
-        ents = emos.flatMap(e => (e.ents||[]).map(t => ({ text:t, type:e.label, pct:e.pct })));
+        emos = entries.map(([label,obj]) => ({ label, pct: pct(obj?.porcentaje) }))
+                      .filter(e=>e.label);
       }
     }
-    if (emos.length===0 && resultado) {
-      if (Array.isArray(resultado)) {
-        emos = resultado.map(x=>({label:String(x.label??x.emotion??x.nombre??""), pct:normPct(x.score??x.valor??x.pct), ents:Array.isArray(x.entidades)?x.entidades:[]}))
-                       .filter(e=>e.label);
-      } else if (resultado.emociones) {
-        if (Array.isArray(resultado.emociones)) {
-          emos = resultado.emociones.map(x=>({label:String(x.label??x.emotion??x.nombre??""), pct:normPct(x.score??x.valor??x.pct), ents:Array.isArray(x.entidades)?x.entidades:[]}))
-                                 .filter(e=>e.label);
-        } else if (typeof resultado.emociones==="object") {
-          emos = Object.entries(resultado.emociones).map(([k,v])=>({label:String(k), pct:normPct(v), ents:[]}));
-        }
-      }
-      const srcEnt = resultado.entidades ?? resultado.entities ?? resultado.ents ?? resultado.keywords ?? null;
-      if (srcEnt) {
-        if (Array.isArray(srcEnt)) {
-          ents = srcEnt.map(e => typeof e==="string" ? ({text:e,type:null,pct:null}) :
-            ({ text:String(e.texto??e.text??e.keyword??""), type:e.tipo??e.type??null, pct:normPct(e.score??e.confidence??e.pct)}));
-        } else if (typeof srcEnt==="object") {
-          ents = Object.entries(srcEnt).map(([k,v])=>({text:String(k), type:null, pct:normPct(v)}));
-        }
-      }
-    }
-    emos = emos.filter(e=>e.label).sort((a,b)=>(b.pct??0)-(a.pct??0));
-    return { emotions: emos, entities: ents, analysisRaw: raw, analysisSource: source };
+    emos = emos.sort((a,b)=>(b.pct??0)-(a.pct??0));
+    return { emotions: emos, analysisRaw: raw, analysisSource: source };
   }, [state?.analisis, note?.emotions]);
-  
-  const extractedText = useMemo(() => (state?.text || state?.texto || note?.ocr_text || "").trim(), [state?.text, state?.texto, note?.ocr_text]);
 
+  const extractedText = useMemo(
+    () => (state?.text || state?.texto || note?.ocr_text || "").trim(),
+    [state?.text, state?.texto, note?.ocr_text]
+  );
 
-  // --- NUEVA FUNCIÓN PARA GENERAR Y FIRMAR EL PDF (REEMPLAZA handleGenerateNote) ---
+  // ---------- firmar + pdf ----------
   async function handleFinalizeAndSign() {
-    // 1. Validación
-    if (!orgId || !patientId || !sessionId) {
-      setErr("Faltan metadatos (Org/Paciente/Sesión) para firmar.");
-      return;
-    }
+    if (!orgId || !patientId || !sessionId) { setErr("Faltan metadatos (Org/Paciente/Sesión) para firmar."); return; }
     if (!soapForm.subjetivo || !soapForm.observacion_clinica || !soapForm.analisis || !soapForm.plan) {
-      setErr("Por favor, completa los cuatro campos obligatorios del SOAP.");
-      return;
+      setErr("Completa los cuatro campos del SOAP."); return;
     }
-
-    setSaving(true);
-    setErr("");
-    setSuccessPdfUrl(null); // Limpiar URL anterior
-
+    setSaving(true); setErr(""); setSuccessPdfUrl(null);
     try {
-        // El payload SOAP que necesita el backend
-        const soapInput = {
-            subjetivo: soapForm.subjetivo,
-            observacion_clinica: soapForm.observacion_clinica,
-            analisis: soapForm.analisis,
-            plan: soapForm.plan,
-        };
-
-        // Llama al nuevo endpoint /sesion/finalizar_y_firmar/{sessionId}
-        const pdfBlob = await finalizarSesionYGenerarNota(
-            sessionId,
-            orgId,
-            patientId,
-            soapInput
-        );
-
-        // Abre el PDF en una nueva pestaña (como lo hacía tu función anterior)
-        const url = URL.createObjectURL(pdfBlob);
-        setSuccessPdfUrl(url); // Guarda la URL para mostrar el enlace de éxito.
-        
-        // Se puede hacer la descarga directa, pero mostrar la URL de éxito es más limpio
-        /*
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `Nota_Evolucion_${sessionId}.pdf`;
-        document.body.appendChild(a);
-        a.click();
-        URL.revokeObjectURL(url);
-        a.remove();
-        */
-
-    } catch (e) { 
-        console.error("Error al finalizar/firmar PDF:", e); 
-        setErr(`Error al firmar y generar PDF: ${e.message}`); 
-    } finally { 
-        setSaving(false); 
-    }
+      const pdfBlob = await finalizarSesionYGenerarNota(sessionId, orgId, patientId, {
+        subjetivo: soapForm.subjetivo,
+        observacion_clinica: soapForm.observacion_clinica,
+        analisis: soapForm.analisis,
+        plan: soapForm.plan,
+      });
+      const url = URL.createObjectURL(pdfBlob);
+      setSuccessPdfUrl(url);
+    } catch (e) {
+      console.error(e);
+      setErr(`Error al firmar y generar PDF: ${e.message}`);
+    } finally { setSaving(false); }
   }
-
-  // --- FUNCIÓN ANTIGUA ELIMINADA ---
-  /*
-  async function handleGenerateNote() {
-    // ESTA FUNCIÓN HA SIDO REEMPLAZADA POR handleFinalizeAndSign
-    // ...
-  }
-  */
 
   const rightActions = (
     <div className="flex-row-center">
@@ -234,127 +252,129 @@ export default function PatientProgressNoteOverview() {
     </div>
   );
 
-  if (err && !saving) { // Muestra errores si no está guardando
+  if (err && !saving) {
     return (
       <AppLayout title="Nota del paciente" rightActions={rightActions}>
-        <div className="container-pad">
-          <div className="alert alert-error">{err}</div>
-        </div>
+        <div className="page-wrap"><MessageBox message={err} type="error" /></div>
       </AppLayout>
     );
   }
 
   return (
-    <AppLayout title="Nota del paciente" rightActions={rightActions}>
-      <LoadingOverlay open={loading} message="Cargando…" />
-      <LoadingOverlay open={saving} message="Generando PDF y Firmando Nota…" />
-      
-      {err && <MessageBox message={err} type="error" />} {/* Muestra errores */}
+    <>
+      <style>{pageCSS}</style>
 
-      <div className="container-pad">
-        <div className="card p-6">
-          {/* Contexto */}
-          <div className="mb-6" style={{display:"flex", flexWrap:"wrap", gap:8, alignItems:"center"}}>
-            <span className="chip chip-neutral">Fuente análisis: {analysisSource}</span>
-            {!!orgId && <span className="chip chip-info">Org: {orgId}</span>}
-            {!!sessionId && <span className="chip chip-info">Sesión: {sessionId}</span>}
-            <span className="chip chip-success">Paciente: {patient?.fullName || patientId || "—"}</span>
-            {!!noteId && <span className="chip chip-neutral">Nota ID: {noteId}</span>}
-          </div>
+      <AppLayout title="Nota del paciente" rightActions={rightActions}>
+        <LoadingOverlay open={loading} message="Cargando…" />
+        <LoadingOverlay open={saving} message="Generando PDF y Firmando Nota…" />
 
-          {/* Texto extraído (referencia) */}
-          <div className="mb-6">
-            <h2 className="h3 mb-2">Texto extraído (Referencia OCR/Audio)</h2>
-            <div className="app-muted rounded-xl p-6">
-              <p className="caption text-muted" style={{whiteSpace:"pre-wrap"}}>{extractedText || "—"}</p>
-            </div>
-          </div>
+        {err && <div className="page-wrap"><MessageBox message={err} type="error" /></div>}
 
-          {/* Emociones + JSON */}
-          <div className="mb-6">
-            <div style={{display:"flex", alignItems:"center", justifyContent:"space-between", gap:12, marginBottom:8}}>
-              <h2 className="h3">Emociones extraídas</h2>
-              <button onClick={()=>setShowAnalysisJSON(v=>!v)} className="btn-ghost h-9">
-                {showAnalysisJSON ? "Ocultar análisis (JSON)" : "Ver análisis (JSON)"}
-              </button>
+        <div className="page-wrap">
+          <div className="card-note">
+            {/* Contexto */}
+            <div className="chips">
+              <span className="chip chip-neutral">Fuente análisis: {analysisSource}</span>
+              {!!orgId && <span className="chip chip-info">Org: {orgId}</span>}
+              {!!sessionId && <span className="chip chip-info">Sesión: {sessionId}</span>}
+              <span className="chip chip-success">Paciente: {patient?.fullName || patientId || "—"}</span>
+              {!!noteId && <span className="chip chip-neutral">Nota ID: {noteId}</span>}
             </div>
 
-            {emotions.length === 0 ? (
-              <div className="caption text-muted">Sin datos de emociones.</div>
-            ) : (
-              <div style={{display:"flex", flexWrap:"wrap", gap:8}}>
-                {emotions.map((e,i)=>(
-                  <span key={`${e.label}-${i}`} className="chip chip-brand" title={e.pct!=null?`${e.pct}%`:"Sin score"}>
-                    {e.label} {e.pct!=null?`${e.pct}%`:"—"}
-                  </span>
-                ))}
+            {/* Texto extraído */}
+            <div style={{ marginBottom: 16 }}>
+              <h2 className="section-title">Texto extraído (Referencia OCR/Audio)</h2>
+              <div className="muted-box" style={{ whiteSpace: "pre-wrap" }}>
+                <p className="caption">{extractedText || "—"}</p>
+              </div>
+            </div>
+
+            {/* Emociones */}
+            <div style={{ marginBottom: 18 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                <h2 className="section-title" style={{ marginBottom: 0 }}>Emociones extraídas</h2>
+                <button onClick={() => setShowAnalysisJSON(v => !v)} className="btn-ghost h-9">
+                  {showAnalysisJSON ? "Ocultar JSON" : "Ver JSON"}
+                </button>
+              </div>
+
+              {emotions.length === 0 ? (
+                <div className="section-sub">Sin datos de emociones.</div>
+              ) : (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+                  {emotions.map((e, i) => (
+                    <span key={`${e.label}-${i}`} className="chip chip-info" title={e.pct != null ? `${e.pct}%` : "Sin score"}>
+                      {e.label} {e.pct != null ? `${e.pct}%` : "—"}
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {showAnalysisJSON && (
+                <pre className="muted-box" style={{ marginTop: 10, overflowX: "auto", fontSize: 12, whiteSpace: "pre-wrap" }}>
+{JSON.stringify(analysisRaw ?? {}, null, 2)}
+                </pre>
+              )}
+            </div>
+
+            {/* Éxito PDF */}
+            {successPdfUrl && (
+              <div className="p-4 bg-green-100 border border-green-400 text-green-700 rounded-xl my-4 text-center">
+                <p className="font-bold mb-3">¡Nota firmada y guardada!</p>
+                <a
+                  href={successPdfUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-2 inline-block text-white bg-green-600 hover:bg-green-700 font-medium rounded-lg text-sm px-5 py-2.5 shadow-lg"
+                >
+                  Ver / Descargar PDF
+                </a>
               </div>
             )}
 
-            {showAnalysisJSON && (
-              <pre className="mt-4 app-muted rounded-xl p-3 text-xs overflow-x-auto" style={{whiteSpace:"pre-wrap"}}>
-{JSON.stringify(analysisRaw ?? {}, null, 2)}
-              </pre>
-            )}
-          </div>
-
-          {/* MENSAJE DE ÉXITO Y LINK A PDF */}
-          {successPdfUrl && (
-            <div className="p-4 bg-green-100 border border-green-400 text-green-700 rounded-xl my-6 text-center">
-              <p className="font-bold mb-3">¡Nota Firmada! El proceso de guardado en GCS y Firestore ha finalizado.</p>
-              <a 
-                href={successPdfUrl} 
-                target="_blank" 
-                rel="noopener noreferrer"
-                className="mt-2 inline-block text-white bg-green-600 hover:bg-green-700 font-medium rounded-lg text-sm px-5 py-2.5 shadow-lg"
-              >
-                Ver/Descargar PDF
-              </a>
+            {/* ---------------- SOAP GRID ---------------- */}
+            <h2 className="section-title" style={{ marginTop: 8 }}>Redacción de la Nota de Evolución (SOAP)</h2>
+            <div className="soap-grid" style={{ marginTop: 8 }}>
+              <SoapRow
+                shortTag="S."
+                longLabel="Subjetivo (Lo que el paciente Reporta)"
+                name="subjetivo"
+                value={soapForm.subjetivo}
+                onChange={handleSoapChange}
+                placeholder="El paciente refiere sentirse '...' o expresa que…"
+                rows={6}
+              />
+              <SoapRow
+                shortTag="O."
+                longLabel="Objetivo (Observación y Datos IA)"
+                name="observacion_clinica"
+                value={soapForm.observacion_clinica}
+                onChange={handleSoapChange}
+                placeholder="Observación clínica del lenguaje corporal, actitud, y referencia a datos de IA (emociones, texto extraído)."
+                rows={6}
+              />
+              <SoapRow
+                shortTag="A."
+                longLabel="Análisis / Evaluación (Diagnóstico y Cuadro Clínico)"
+                name="analisis"
+                value={soapForm.analisis}
+                onChange={handleSoapChange}
+                placeholder="Interpretación clínica, evolución del cuadro y justificación del tratamiento."
+                rows={6}
+              />
+              <SoapRow
+                shortTag="P."
+                longLabel="Plan (Tratamiento y Próximos Pasos)"
+                name="plan"
+                value={soapForm.plan}
+                onChange={handleSoapChange}
+                placeholder="Indicaciones médicas, tareas asignadas, metas y pronóstico."
+                rows={6}
+              />
             </div>
-          )}
 
-          {/* FORMULARIO SOAP */}
-          <div className="mb-6">
-            <h2 className="h2 mb-4">Redacción de la Nota de Evolución (SOAP)</h2>
-
-            <SoapTextarea
-              label="S. Subjetivo (Lo que el paciente Reporta)"
-              id="subjetivo"
-              name="subjetivo"
-              value={soapForm.subjetivo}
-              onChange={handleSoapChange}
-              placeholder="El paciente refiere sentirse '...' o expresa que..."
-            />
-            
-            <SoapTextarea
-              label="O. Objetivo (Observación y Datos IA)"
-              id="observacion_clinica"
-              name="observacion_clinica"
-              value={soapForm.observacion_clinica}
-              onChange={handleSoapChange}
-              placeholder="Observación clínica del lenguaje corporal, actitud y referencia a los datos de IA (emociones, texto extraído)."
-            />
-            
-            <SoapTextarea
-              label="A. Análisis / Evaluación (Diagnóstico y Cuadro Clínico)"
-              id="analisis"
-              name="analisis"
-              value={soapForm.analisis}
-              onChange={handleSoapChange}
-              placeholder="Interpretación clínica, evolución del cuadro y justificación del tratamiento."
-            />
-            
-            <SoapTextarea
-              label="P. Plan (Tratamiento y Próximos Pasos)"
-              id="plan"
-              name="plan"
-              value={soapForm.plan}
-              onChange={handleSoapChange}
-              placeholder="Indicaciones médicas, tareas asignadas, metas y pronóstico."
-            />
-            
-            {/* BOTÓN DE FIRMA */}
-            <div style={{marginTop:24, display:"flex", justifyContent:"flex-end"}}>
+            {/* Firmar */}
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
               <button
                 onClick={handleFinalizeAndSign}
                 disabled={saving || !orgId || !patientId || !sessionId || !!successPdfUrl}
@@ -364,15 +384,15 @@ export default function PatientProgressNoteOverview() {
                 {saving ? "Firmando y Generando PDF..." : "Finalizar y Firmar Nota (PDF)"}
               </button>
             </div>
-          </div>
 
-          {/* Acciones inferiores */}
-          <div style={{display:"flex", justifyContent:"center", gap:16, marginTop:32}}>
-            <button onClick={()=>navigate("/generate-progress-note")} className="btn-primary h-12 px-6">Nueva captura</button>
-            <button onClick={()=>navigate("/patient-list")} className="btn-ghost h-12 px-6">Ver pacientes</button>
+            {/* Acciones inferiores */}
+            <div className="footer-ctas">
+              <button onClick={() => navigate("/generate-progress-note")} className="btn-primary h-12 px-6">Nueva captura</button>
+              <button onClick={() => navigate("/patient-list")} className="btn-ghost h-12 px-6">Ver pacientes</button>
+            </div>
           </div>
         </div>
-      </div>
-    </AppLayout>
+      </AppLayout>
+    </>
   );
 }
