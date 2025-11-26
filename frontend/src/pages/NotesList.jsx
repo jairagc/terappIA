@@ -1,3 +1,4 @@
+// src/pages/NotesList.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
@@ -9,6 +10,7 @@ import AppSidebar from "../components/AppSidebar";
 import LoadingOverlay from "../components/LoadingOverlay";
 import { useDoctorProfile } from "../services/userDoctorProfile";
 
+// --- Utils ---
 function parseNotePath(path) {
   const parts = String(path || "").split("/");
   const after = (key) => {
@@ -36,25 +38,17 @@ function fmtDate(ts) {
   }
 }
 
-// 1. Lógica de color de avatar fuera del componente principal
-const avatarColors = [
-  "#7c3aed", // Violeta
-  "#2563eb", // Azul
-  "#059669", // Verde
-  "#d97706", // Naranja
-  "#db2777", // Rosa
-];
-
+// Avatar color helpers
+const avatarColors = ["#7c3aed", "#2563eb", "#059669", "#d97706", "#db2777"];
 const getAvatarStyle = (id) => {
-  // Genera un color consistente basado en el ID
   let hash = 0;
   if (!id) return {};
   for (let i = 0; i < id.length; i++) {
-      hash = id.charCodeAt(i) + ((hash << 5) - hash);
-      hash = hash & hash; // Convert to 32bit integer
+    hash = id.charCodeAt(i) + ((hash << 5) - hash);
+    hash = hash & hash;
   }
-  const colorIndex = Math.abs(hash) % avatarColors.length;
-  return { backgroundColor: avatarColors[colorIndex] };
+  const idx = Math.abs(hash) % avatarColors.length;
+  return { backgroundColor: avatarColors[idx] };
 };
 
 export default function NotesList() {
@@ -75,13 +69,13 @@ export default function NotesList() {
   // Filtros
   const [search, setSearch] = useState("");
   const [onlyRecent7, setOnlyRecent7] = useState(false);
-  const [withEmotions, setWithEmotions] = useState(false);
-  const [typeFilter, setTypeFilter] = useState("all"); // all | text | photo | audio
 
   // Datos
   const [notes, setNotes] = useState([]);
-  // Almacenamos el nombre y el ID del paciente, mapeado por patientId
   const [patientsMap, setPatientsMap] = useState({});
+
+  // API base (orquestador)
+  const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8080";
 
   useEffect(() => {
     const cached = localStorage.getItem("orgId") || "";
@@ -96,7 +90,6 @@ export default function NotesList() {
         const colRef = collection(db, "orgs", orgId, "doctors", uid, "patients");
         const snap = await getDocs(colRef);
         if (!alive) return;
-        // Almacenar el paciente completo para usar su ID para el color
         const map = {};
         snap.forEach((d) => (map[d.id] = { fullName: d.data()?.fullName || d.id, id: d.id }));
         setPatientsMap(map);
@@ -172,26 +165,41 @@ export default function NotesList() {
         const ms = ts?.toMillis ? ts.toMillis() : ts?.seconds ? ts.seconds * 1000 : null;
         if (ms && ms < recent7Start) return false;
       }
-      if (withEmotions) {
-        const emo = n.data?.emotions ?? null;
-        const hasE = !!emo && (Array.isArray(emo) ? emo.length > 0 : Object.keys(emo).length > 0);
-        if (!hasE) return false;
-      }
-      if (typeFilter !== "all") {
-        const t = (n.data?.type || "").toLowerCase();
-        if (t !== typeFilter) return false;
-      }
       return true;
     });
-  }, [notes, search, onlyRecent7, withEmotions, typeFilter, patientsMap]);
+  }, [notes, search, onlyRecent7, patientsMap]);
 
   const initials = (name = "") =>
     name.split(" ").filter(Boolean).slice(0, 2).map(s => s[0]?.toUpperCase()).join("") || "NT";
 
+  // Abrir PDF con URL firmada
+  async function openSignedPdf({ orgId, patientId, sessionId }) {
+    try {
+      const idToken = await user.getIdToken();
+      const resp = await fetch(`${API_BASE}/signed_pdf_url`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${idToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ org_id: orgId, patient_id: patientId, session_id: sessionId }),
+      });
+      if (!resp.ok) {
+        const txt = await resp.text().catch(() => "");
+        throw new Error(`HTTP ${resp.status}: ${txt}`);
+      }
+      const { url } = await resp.json();
+      window.open(url, "_blank");
+    } catch (e) {
+      console.error("PDF error:", e);
+      alert("No se pudo abrir el PDF (verifica que la sesión tenga nota final y permisos).");
+    }
+  }
+
   const rightActions = (
     <div className="flex-row-center">
-      <button onClick={() => navigate("/generate-progress-note")} className="btn ghost h-10">Nueva nota</button>
-      <button onClick={() => navigate("/patient-list")} className="btn ghost h-10">Ver pacientes</button>
+      <button onClick={() => navigate("/generate-progress-note")} className="btn ghost h-10 hidden sm:inline-flex">Nueva nota</button>
+      <button onClick={() => navigate("/patient-list")} className="btn ghost h-10 hidden sm:inline-flex">Ver pacientes</button>
       <button
         onClick={async () => { try { setBusyMsg("Cerrando sesión…"); await logout(); navigate("/login", { replace: true }); } finally { setBusyMsg(""); } }}
         className="btn ghost h-10"
@@ -218,57 +226,37 @@ export default function NotesList() {
     >
       <LoadingOverlay open={loading || !!busyMsg} message={busyMsg || "Cargando…"} />
 
-      {/* Banner de error rojo suave */}
-      {/* MODIFICACIÓN: Aplicamos maxw-7xl al contenedor de banners y padding si es necesario */}
-      <div className="px-4 sm:px-6 pt-5 maxw-7xl">
+      {/* Mensajes/errores */}
+      <div className="px-3 sm:px-6 pt-4 maxw-7xl">
         {!orgId && (
-          <div className="alert-warn mb-3">⚠️ Captura tu <b>Organización</b> en <b>Perfil</b> para ver tus notas.</div>
+          <div className="alert-warn mb-3 text-sm sm:text-base">
+            ⚠️ Captura tu <b>Organización</b> en <b>Perfil</b> para ver tus notas.
+          </div>
         )}
-        {err && <div className="alert-error-banner mb-3">No se pudieron cargar las notas.</div>}
+        {err && <div className="alert-error-banner mb-3 text-sm sm:text-base">No se pudieron cargar las notas.</div>}
       </div>
 
-      {/* PILLS de filtro */}
-      <section className="px-4 sm:px-6 maxw-7xl">
-        <div className="pillbar">
-          <div className="pillbar-left">
-            {/* MODIFICACIÓN: Cambiamos a clases definidas en CSS (pill-total/pill-filtered) */}
-            <span className="pill pill-total">Total: {notes.length}</span>
-            <span className="pill pill-filtered">Filtradas: {filtered.length}</span>
+      {/* Filtros compactos: solo 7 días + búsqueda (móvil friendly) */}
+      <section className="px-3 sm:px-6 maxw-7xl">
+        <div className="pillbar" style={{ gap: 8, padding: "10px 12px" }}>
+          <div className="pillbar-left" style={{ gap: "8px 12px" }}>
+            <span className="pill pill-total text-xs sm:text-sm">Total: {notes.length}</span>
+            <span className="pill pill-filtered text-xs sm:text-sm">Filtradas: {filtered.length}</span>
 
             <div
-              className={`pill pill-toggle ${onlyRecent7 ? "pill-primary" : "pill-ghost"}`}
+              className={`pill pill-toggle text-xs sm:text-sm ${onlyRecent7 ? "pill-primary" : "pill-ghost"}`}
               onClick={() => setOnlyRecent7(v => !v)}
+              title="Mostrar solo últimos 7 días"
             >
               Últimos 7 días
-              <span className="material-symbols-outlined">{onlyRecent7 ? "check" : "expand_more"}</span>
-            </div>
-
-            <div
-              className={`pill pill-toggle ${withEmotions ? "pill-primary" : "pill-ghost"}`}
-              onClick={() => setWithEmotions(v => !v)}
-            >
-              Con emociones
-              <span className="material-symbols-outlined">{withEmotions ? "check" : "expand_more"}</span>
-            </div>
-
-            <div className="pill pill-input">
-              <span className="label">Tipo</span>
-              <select
-                value={typeFilter}
-                onChange={(e) => setTypeFilter(e.target.value)}
-                className="select no-border"
-              >
-                <option value="all">Todos</option>
-                <option value="text">Texto</option>
-                <option value="photo">Foto</option>
-                <option value="audio">Audio</option>
-              </select>
-              <span className="material-symbols-outlined">expand_more</span>
+              <span className="material-symbols-outlined" style={{ fontSize: 18 }}>
+                {onlyRecent7 ? "check" : "expand_more"}
+              </span>
             </div>
           </div>
 
-          <div className="pillbar-right">
-            <div className="pill pill-search">
+          <div className="pillbar-right" style={{ width: "100%", maxWidth: 480 }}>
+            <div className="pill pill-search" style={{ minWidth: 0, width: "100%" }}>
               <span className="material-symbols-outlined">search</span>
               <input
                 value={search}
@@ -281,82 +269,83 @@ export default function NotesList() {
         </div>
       </section>
 
-      {/* Lista de notas */}
+      {/* Lista */}
       {!loading && !err && (
-        <section className="px-4 sm:px-6 pb-8 maxw-7xl">
+        <section className="px-3 sm:px-6 pb-8 maxw-7xl">
           {filtered.length === 0 ? (
-            <div className="mt-6 card p-8 text-center">
-              <p className="text-[var(--alert-error-banner)]">
+            <div className="mt-4 card p-5 text-center">
+              <p className="text-sm sm:text-base">
                 {notes.length === 0 ? "No hay notas aún. Crea una nueva." : "No hay resultados con el filtro/búsqueda."}
               </p>
             </div>
           ) : (
-            <div className="notes-grid mt-6">
+            <div className="notes-grid mt-4"
+              style={{
+                gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))"
+              }}
+            >
               {filtered.map((n) => {
-                // Usamos el objeto completo del paciente, si existe
                 const patientData = patientsMap[n.meta.patientId];
                 const pName = patientData?.fullName || n.meta.patientId;
-                const pId = patientData?.id || n.meta.patientId; // Usamos el Patient ID para el color
-                
+                const pId = patientData?.id || n.meta.patientId;
+
                 const ts = n.data?.processed_at || n.data?.created_at;
                 const preview = (n.data?.ocr_text || "").slice(0, 160);
-                const emo = n.data?.emotions?.resultado || n.data?.emotions;
-
-                let emoChips = [];
-                if (emo && typeof emo === "object" && !Array.isArray(emo)) {
-                  emoChips = Object.entries(emo)
-                    .map(([k, v]) => {
-                      const raw = v?.porcentaje ?? v?.score ?? v?.valor ?? v?.pct ?? null;
-                      const pct = raw == null ? null : Number(raw) <= 1 ? Math.round(Number(raw) * 100) : Math.round(Number(raw));
-                      return { label: k, pct };
-                    })
-                    .filter((x) => x.label)
-                    .sort((a, b) => (b.pct ?? 0) - (a.pct ?? 0))
-                    .slice(0, 2);
-                }
 
                 return (
                   <div key={n.meta.noteId} className="card note-card p-4">
-                    <div className="flex items-center gap-4">
-                     
-                      <div 
-                        className="avatar" 
-                        title={pName} 
-                        style={getAvatarStyle(pId)}
+                    {/* Header card */}
+                    <div className="flex items-center gap-3">
+                      <div
+                        className="avatar"
+                        title={pName}
+                        style={{
+                          ...getAvatarStyle(pId),
+                          width: 40, height: 40,
+                          borderRadius: 999,
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          fontWeight: 800, color: "#fff", flexShrink: 0
+                        }}
                       >
-                        {initials(String(pName))}
+                        {pName ? pName.split(" ").slice(0, 2).map(s => s[0]?.toUpperCase()).join("") : "NT"}
                       </div>
                       <div className="min-w-0">
-                        
-                        <p className="text-sm font-semibold truncate">{pName}</p> {/* MODIFICACIÓN: Reducción de letra de metadata a 'text-xs' y nombre de clase */}
-                        <p className="text-xs text-[var(--text-muted)]">{fmtDate(ts)} · {n.data?.type || "text"}</p>
+                        <p className="truncate font-semibold text-sm sm:text-base">{pName}</p>
+                        <p className="text-[12px] opacity-80">{fmtDate(ts)} · {n.data?.type || "text"}</p>
                       </div>
                     </div>
 
+                    {/* Body */}
                     {preview && (
-                      
-                      <p className="mt-3 text-sm text-[var(--text-muted)] line-clamp-3">
+                      <p className="mt-3 text-[13px] sm:text-sm opacity-80 line-clamp-3">
                         {preview}{preview.length >= 160 ? "…" : ""}
                       </p>
                     )}
 
-                    {emoChips.length > 0 && (
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        {emoChips.map((e) => (
-                          <span key={`${n.meta.noteId}-${e.label}`} className="emochip">
-                            {e.label} {e.pct != null ? `${e.pct}%` : ""}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-
-                    <div className="mt-4 flex items-center justify-between">
-                      
-                      <span className="id-pill">
+                    {/* Footer actions */}
+                    <div className="mt-4 flex items-center justify-between gap-2">
+                      <span className="id-pill text-[12px] sm:text-sm">
                         <span className="material-symbols-outlined">fingerprint</span>
                         Nota: {n.meta.noteId}
                       </span>
                       <div className="flex gap-2">
+                        {/* Abrir PDF firmado */}
+                        <button
+                          onClick={() =>
+                            openSignedPdf({
+                              orgId: n.meta.orgId,
+                              patientId: n.meta.patientId,
+                              sessionId: n.meta.sessionId,
+                            })
+                          }
+                          className="pill pill-ghost text-xs sm:text-sm"
+                          title="Abrir PDF firmado"
+                        >
+                          <span className="material-symbols-outlined">picture_as_pdf</span>
+                          PDF
+                        </button>
+
+                        {/* Abrir detalle */}
                         <button
                           onClick={() =>
                             navigate("/patient-progress-note-overview", {
@@ -370,15 +359,17 @@ export default function NotesList() {
                               },
                             })
                           }
-                          className="pill pill-primary"
+                          className="pill pill-primary text-xs sm:text-sm"
                         >
                           Abrir
                         </button>
+
+                        {/* Nueva captura (misma paciente) */}
                         <button
                           onClick={() => navigate("/generate-progress-note", { state: { patientId: n.meta.patientId } })}
-                          className="pill pill-ghost"
+                          className="pill pill-ghost text-xs sm:text-sm"
                         >
-                          Nueva captura
+                          Nueva
                         </button>
                       </div>
                     </div>
