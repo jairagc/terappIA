@@ -6,13 +6,10 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 from pathlib import Path
 import io
-import logging # <-- AÑADIDO
-
-# --- NUEVAS IMPORTACIONES PARA PDF/FIRMA ---
+import logging 
 import weasyprint
 import hashlib
 import html
-
 from fastapi import (
     FastAPI, File, UploadFile, HTTPException, Header, Form, Depends, Request, Body
 )
@@ -151,7 +148,6 @@ class GuardarNotaOut(BaseModel):
     note_id: str
     analisis: Dict[str, Any]
 
-# --- NUEVO SCHEMA PARA PDF SOAP (AÑADIDO) ---
 class DoctorSOAPInput(BaseModel):
     """
     Modelo de entrada para la nota SOAP que el doctor escribe
@@ -170,6 +166,11 @@ class FinalizarSesionPayload(BaseModel):
     org_id: str
     patient_id: str
     soap_input: DoctorSOAPInput
+
+class SignedPdfIn(BaseModel):
+    org_id: str = Field(..., description="Nombre de la organización (puede tener espacios)")
+    patient_id: str
+    session_id: str
 
 async def _save_note_to_firestore(
     db_client,
@@ -225,7 +226,27 @@ def build_forward_headers(authorization: Optional[str], uid: Optional[str]) -> D
     return headers
 
 # ──────────────────────────────────────────────────────────────────────────────
-# --- NUEVA FUNCIÓN AUXILIAR DE PDF (AÑADIDO) ---
+from datetime import timedelta
+from pydantic import BaseModel, Field
+
+def build_pdf_object_name(org_id: str, doctor_uid: str, patient_id: str, session_id: str) -> str:
+    return f"{org_id}/{doctor_uid}/{patient_id}/sessions/{session_id}/derived/evolution/evolution_note_{session_id}.pdf"
+
+def object_exists(bucket_name: str, object_name: str) -> bool:
+    bucket = storage_client.bucket(bucket_name)
+    blob = bucket.blob(object_name)
+    return blob.exists(storage_client)
+
+def generate_signed_get_url(bucket_name: str, object_name: str, expires_seconds: int = 300) -> str:
+    bucket = storage_client.bucket(bucket_name)
+    blob = bucket.blob(object_name)
+    return blob.generate_signed_url(
+        version="v4",
+        expiration=timedelta(seconds=expires_seconds),
+        method="GET",
+        response_disposition=f'inline; filename="{Path(object_name).name}"',
+    )
+# ──────────────────────────────────────────────────────────────────────────────
 
 def formatear_analisis_html(analisis: dict) -> str:
     """
@@ -531,7 +552,40 @@ async def finalizar_y_firmar_sesion(
         media_type="application/pdf",
         headers={"Content-Disposition": f"inline; filename=Nota_{session_id}.pdf"}
     )
+    
+# ──────────────────────────────────────────────────────────────────────────────
+@app.post("/signed_pdf_url")
+async def signed_pdf_url(
+    payload: SignedPdfIn,
+    current_user: dict = Depends(get_current_user),
+):
+    if not BUCKET_NAME:
+        raise HTTPException(status_code=500, detail="Bucket no configurado")
 
+    doctor_uid = current_user.get("uid")
+    if not doctor_uid:
+        raise HTTPException(status_code=401, detail="Token sin uid")
+
+    object_name = build_pdf_object_name(
+        org_id=payload.org_id,
+        doctor_uid=doctor_uid,
+        patient_id=payload.patient_id,
+        session_id=payload.session_id,
+    )
+
+    try:
+        if not object_exists(BUCKET_NAME, object_name):
+            raise HTTPException(
+                status_code=404,
+                detail=f"No existe: gs://{BUCKET_NAME}/{object_name}"
+            )
+        url = generate_signed_get_url(BUCKET_NAME, object_name, expires_seconds=300)
+        return {"url": url, "expires_in_seconds": 300}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[signed_pdf_url] Error firmando {object_name}: {e}")
+        raise HTTPException(status_code=500, detail="No se pudo firmar el PDF")
 
 # ──────────────────────────────────────────────────────────────────────────────
 @app.get("/health")
