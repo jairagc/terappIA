@@ -1,3 +1,4 @@
+// src/components/AppSidebar.jsx
 import React from "react";
 import { NavLink } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
@@ -24,7 +25,9 @@ export default function AppSidebar({ collapsed = false }) {
         />
         {!collapsed && (
           <div className="user-meta">
-            <p className="user-name trunc" title={name || ""}>{name || "—"}</p>
+            <p className="user-name trunc" title={name || ""}>
+              {name || "—"}
+            </p>
             {!!email && (
               <p className="user-email trunc" title={email}>
                 {email}
@@ -61,6 +64,18 @@ export default function AppSidebar({ collapsed = false }) {
         >
           <span className="material-symbols-outlined">group</span>
           {!collapsed && <span className="nav-text trunc">Pacientes</span>}
+        </NavLink>
+
+        {/* NUEVO: Agregar paciente */}
+        <NavLink
+          to="/register-new-patient"
+          className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
+          title="Agregar paciente"
+        >
+          <span className="material-symbols-outlined">person_add</span>
+          {!collapsed && (
+            <span className="nav-text trunc">Agregar paciente</span>
+          )}
         </NavLink>
 
         <NavLink

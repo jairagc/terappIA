@@ -168,7 +168,7 @@ class FinalizarSesionPayload(BaseModel):
     soap_input: DoctorSOAPInput
 
 class SignedPdfIn(BaseModel):
-    org_id: str = Field(..., description="Nombre de la organización (puede tener espacios)")
+    org_id: str = File(..., description="Nombre de la organización (puede tener espacios)")
     patient_id: str
     session_id: str
 
@@ -185,6 +185,10 @@ async def _save_note_to_firestore(
     text_content: str,
     analysis_result: dict,
 ):
+    """
+    Guarda la nota con campos de scoping para poder filtrar con collectionGroup
+    y para que las reglas puedan autorizar la lectura.
+    """
     if not db_client:
         return
     try:
@@ -195,24 +199,37 @@ async def _save_note_to_firestore(
             .collection("sessions").document(session_id)
             .collection("notes").document(note_id)
         )
+
+        # ⬇️ Campos denormalizados claves para seguridad/consultas
         note_data = {
             "note_id": note_id,
-            "type": note_type,
-            "source": source_type,
-            "gcs_uri_source": source_gcs_uri,
-            "ocr_text": text_content,
-            "emotions": (analysis_result or {}).get("resultado", {}),
+            "org_id": org_id,                 # ← NUEVO
+            "doctor_uid": doctor_uid,         # ← NUEVO
+            "patient_id": patient_id,         # ← NUEVO
+            "session_id": session_id,         # ← NUEVO
+
+            "type": note_type,                # "image" | "audio" | "text"
+            "source": source_type,            # "upload" | "gcs_uri" | "final"
+            "gcs_uri_source": source_gcs_uri, # gs://... o None
+            "ocr_text": text_content,         # texto extraído o final
+            "emotions": (analysis_result or {}).get("resultado", {}),  # JSON limpio
             "status_pipeline": "done",
         }
+
+        # Timestamps del lado servidor (siempre que se pueda)
         try:
-            note_data["created_at"] = firestore.SERVER_TIMESTAMP  # type: ignore
-            note_data["processed_at"] = firestore.SERVER_TIMESTAMP  # type: ignore
+            from google.cloud import firestore as _fs  # import local para evitar sombras
+            note_data["created_at"] = _fs.SERVER_TIMESTAMP
+            note_data["processed_at"] = _fs.SERVER_TIMESTAMP
         except Exception:
             pass
+
         note_ref.set(note_data)
-        logger.info(f"Nota de IA guardada en Firestore: {note_ref.path}") # Log mejorado
+        logger.info(f"[OK] Nota guardada: {note_ref.path}")
+
     except Exception as e:
         logger.warning(f"[WARN] Firestore write failed for note {note_id}: {e}")
+
 
 def _timestamp() -> str:
     return datetime.now().strftime("%Y%m%d_%H%M%S")

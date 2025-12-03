@@ -1,10 +1,20 @@
 // src/components/AppLayout.tsx
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, ReactNode } from "react";
 import AppHeader from "./AppHeader";
 import AppFooter from "./AppFooter";
 import AppSidebar from "./AppSidebar";
 
-export default function AppLayout({ children, rightActions = null, title = null }) {
+type AppLayoutProps = {
+  children: ReactNode;
+  title?: ReactNode;
+  rightActions?: ReactNode;
+};
+
+export default function AppLayout({
+  children,
+  rightActions = null,
+  title = null,
+}: AppLayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const headerProps = useMemo(
@@ -17,15 +27,30 @@ export default function AppLayout({ children, rightActions = null, title = null 
   );
 
   return (
-    <div style={{minHeight: "100vh", display:"flex", flexDirection:"column", background:"var(--bg)", color:"var(--text)"}}>
+    <div className="app-root">
+      {/* HEADER */}
       <AppHeader {...headerProps} />
 
+      {/* SHELL PRINCIPAL */}
       <div className="app-shell">
-        <AppSidebar collapsed={!sidebarOpen} />
+        {/* SIDEBAR */}
+        <AppSidebar
+          collapsed={!sidebarOpen}
+          onToggle={() => setSidebarOpen((v) => !v)}
+        />
+
+        {/* CONTENIDO */}
         <main className="app-main">{children}</main>
       </div>
 
+      {/* FOOTER */}
       <AppFooter />
+
+      {/* BACKDROP MOBILE */}
+      <div
+        className={`sidebar-backdrop ${sidebarOpen ? "is-open" : ""}`}
+        onClick={() => setSidebarOpen(false)}
+      />
     </div>
   );
 }
