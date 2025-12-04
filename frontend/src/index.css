@@ -902,7 +902,9 @@ button.is-disabled { opacity: .55; pointer-events: none; }
     align-items: center;
     justify-content: center;
     gap: 8px;
-    padding: 3px;
+    padding: 5px 12px;
+    margin-bottom: 7px;
+    margin-left: 24%;
 }
 .btn-google:hover {
     /* MODIFICACIÓN: Hover con ALT1 suave */
@@ -917,7 +919,17 @@ button.is-disabled { opacity: .55; pointer-events: none; }
     height: 20px;
     border-radius: 30px;
 }
+.btn-google .google-icon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
 
+.btn-google .google-text {
+  text-align: center;
+  font-weight: 600;
+  flex: 0 0 auto;
+}
 .login-card p.caption.text-muted {
     font-weight: 700; 
     opacity: 1; /* Asegura que no esté desvanecido */

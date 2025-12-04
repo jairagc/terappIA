@@ -9,6 +9,40 @@ import AppLayout from "../components/AppLayout";
 import LoadingOverlay from "../components/LoadingOverlay";
 import { finalizarSesionYGenerarNota } from "../services/orchestrator";
 
+
+const ToastBubble = ({ type = "info", title, message, actionLabel, onAction, onClose }) => {
+  const typeClass = {
+    success: "toast-success",
+    error: "toast-error",
+    warn: "toast-warn",
+    info: "toast-info",
+  };
+  const iconName = {
+    success: "check_circle",
+    error: "error",
+    warn: "warning",
+    info: "info",
+  }[type] || "info";
+
+  return (
+    <div className={`toast-bubble ${typeClass[type] || ""}`} role="alert">
+      <span className="material-symbols-outlined toast-icon">{iconName}</span>
+      <div className="toast-body">
+        {title && <p className="toast-title">{title}</p>}
+        {message && <p className="toast-message">{message}</p>}
+        {actionLabel && onAction && (
+          <button className="toast-action" onClick={onAction}>
+            {actionLabel}
+          </button>
+        )}
+      </div>
+      <button className="toast-close" onClick={onClose}>
+        <span className="material-symbols-outlined">close</span>
+      </button>
+    </div>
+  );
+};
+
 // --------------------------- UI helpers ---------------------------
 const MessageBox = ({ message, type }) => {
   const base = "p-4 rounded-xl my-4";
@@ -75,7 +109,7 @@ export default function PatientProgressNoteOverview() {
     plan: "",
   });
   const [successPdfUrl, setSuccessPdfUrl] = useState(null);
-
+  const [toast, setToast] = useState(null); 
   const [showAnalysisJSON, setShowAnalysisJSON] = useState(false);
   const handleSoapChange = (e) => {
     const { name, value } = e.target;
@@ -84,6 +118,62 @@ export default function PatientProgressNoteOverview() {
 
   // ---------- estilos responsivos locales ----------
   const pageCSS = `
+      /* -------- TOAST (globo emergente) -------- */
+    .toast-bubble{
+      position:fixed;
+      top:calc(var(--header-h,64px) + 10px);
+      left:50%;
+      transform:translateX(-50%);
+      z-index:60;
+      display:flex;
+      align-items:center;
+      gap:10px;
+      padding:10px 14px;
+      border-radius:999px;
+      background:#fff;
+      border:1px solid #e5e7eb;
+      box-shadow:0 12px 30px rgba(15,23,42,0.2);
+      max-width:min(480px, calc(100% - 24px));
+    }
+    .toast-icon{ font-size:20px; }
+    .toast-body{ display:flex; flex-direction:column; gap:2px; }
+    .toast-title{ font-weight:700; font-size:14px; margin:0; }
+    .toast-message{ font-size:13px; margin:0; }
+    .toast-action{
+      margin-top:4px;
+      align-self:flex-start;
+      padding:6px 10px;
+      border-radius:999px;
+      border:none;
+      font-size:12px;
+      font-weight:600;
+      cursor:pointer;
+      background:#16a34a;
+      color:#fff;
+    }
+    .toast-close{
+      border:none;
+      background:transparent;
+      cursor:pointer;
+      padding:4px;
+      display:flex; align-items:center; justify-content:center;
+    }
+
+    .toast-success{ background:#ecfdf3; border-color:#16a34a33; }
+    .toast-error{ background:#fef2f2; border-color:#f9737333; }
+    .toast-warn{ background:#fffbeb; border-color:#facc1533; }
+    .toast-info{ background:#eff6ff; border-color:#60a5fa55; }
+
+    @media (max-width:640px){
+      .toast-bubble{
+        border-radius:14px;
+        padding:9px 12px;
+        font-size:12px;
+      }
+      .toast-title{ font-size:13px; }
+      .toast-message{ font-size:12px; }
+    }
+
     .page-wrap{ padding:16px; overflow-x:hidden; }
     .card-note{
       padding:20px; border-radius:16px;
@@ -225,11 +315,38 @@ export default function PatientProgressNoteOverview() {
 
   // ---------- firmar + pdf ----------
   async function handleFinalizeAndSign() {
-    if (!orgId || !patientId || !sessionId) { setErr("Faltan metadatos (Org/Paciente/Sesión) para firmar."); return; }
-    if (!soapForm.subjetivo || !soapForm.observacion_clinica || !soapForm.analisis || !soapForm.plan) {
-      setErr("Completa los cuatro campos del SOAP."); return;
+    if (!orgId || !patientId || !sessionId) {
+      setErr("Faltan metadatos (Org/Paciente/Sesión) para firmar.");
+      return;
     }
-    setSaving(true); setErr(""); setSuccessPdfUrl(null);
+
+    // ✅ Validación SOAP: no deja continuar y muestra advertencia
+    if (
+      !soapForm.subjetivo.trim() ||
+      !soapForm.observacion_clinica.trim() ||
+      !soapForm.analisis.trim() ||
+      !soapForm.plan.trim()
+    ) {
+      setToast({
+        type: "warn",
+        title: "Faltan campos SOAP",
+        message:
+          "Completa los cuatro apartados (S, O, A y P) antes de firmar la nota de evolución.",
+      });
+
+      // Opcional: hacer scroll suave a la sección SOAP
+      const soapEl = document.querySelector(".soap-grid");
+      if (soapEl) {
+        soapEl.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+      return;
+    }
+
+    setSaving(true);
+    setErr("");
+    setSuccessPdfUrl(null);
+    setToast(null); // limpiamos toasts anteriores
+
     try {
       const pdfBlob = await finalizarSesionYGenerarNota(sessionId, orgId, patientId, {
         subjetivo: soapForm.subjetivo,
@@ -239,10 +356,25 @@ export default function PatientProgressNoteOverview() {
       });
       const url = URL.createObjectURL(pdfBlob);
       setSuccessPdfUrl(url);
+      setToast({
+        type: "success",
+        title: "¡Nota firmada y guardada!",
+        message: "Tu nota de evolución se generó correctamente.",
+        actionLabel: "Ver / Descargar PDF",
+        onAction: () => window.open(url, "_blank"),
+    });
     } catch (e) {
       console.error(e);
       setErr(`Error al firmar y generar PDF: ${e.message}`);
-    } finally { setSaving(false); }
+      setToast({
+        type: "error",
+        title: "Error al firmar la nota",
+        message: e?.message || "No se pudo generar/firma el PDF. Intenta de nuevo.",
+      });
+    } finally {
+      setSaving(false);
+    }
+
   }
 
   const rightActions = (
@@ -267,7 +399,16 @@ export default function PatientProgressNoteOverview() {
       <AppLayout title="Nota del paciente" rightActions={rightActions}>
         <LoadingOverlay open={loading} message="Cargando…" />
         <LoadingOverlay open={saving} message="Generando PDF y Firmando Nota…" />
-
+        {toast && (
+          <ToastBubble
+            type={toast.type}
+            title={toast.title}
+            message={toast.message}
+            actionLabel={toast.actionLabel}
+            onAction={toast.onAction}
+            onClose={() => setToast(null)}
+          />
+        )}
         {err && <div className="page-wrap"><MessageBox message={err} type="error" /></div>}
 
         <div className="page-wrap">
@@ -331,6 +472,7 @@ export default function PatientProgressNoteOverview() {
                 </a>
               </div>
             )}
+
 
             {/* ---------------- SOAP GRID ---------------- */}
             <h2 className="section-title" style={{ marginTop: 8 }}>Redacción de la Nota de Evolución (SOAP)</h2>

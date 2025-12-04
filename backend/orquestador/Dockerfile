@@ -26,6 +26,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # Limpia la caché de apt para mantener la imagen ligera
     rm -rf /var/lib/apt/lists/*
 
+COPY terapia-471517-8474c5fd5787.json /app/terapia-471517-8474c5fd5787.json
+
 WORKDIR /app
 
 # Instalar dependencias de Python

@@ -22,18 +22,17 @@ const getAltColorVar = (id) => {
 };
 
 // ——— estilos embebidos (responsive + centrado)
+// ——— estilos embebidos (responsive + centrado)
 const pageCSS = `
   .page-pad {
-    padding: 16px;
-    display: flex;
-    justify-content: center;
+    padding: 16px 8px;
+    /* nada de flex aquí, dejamos que el grid mande */
   }
 
   .page-inner {
     width: 100%;
     max-width: 1120px;
-    margin-left:0px;
-    margin-right:10px ;
+    margin: 0 auto;
   }
 
   .page-inner .card {
@@ -45,26 +44,26 @@ const pageCSS = `
     display:flex;
     align-items:center;
     justify-content:space-between;
-    gap:12px;
+    gap:5px;
     flex-wrap:wrap;
   }
   .pillbar-left,
   .pillbar-right {
     display:flex;
     align-items:center;
-    gap:10px;
+    gap:8px;
     flex-wrap:wrap;
   }
 
   .pill {
     display:inline-flex;
     align-items:center;
-    gap:8px;
+    gap:5px;
     padding:8px 12px;
     border-radius:999px;
     border:1px solid var(--line-soft,#e6ebf3);
     background:#fff;
-    font-weight:600;
+    font-weight:700;
   }
   .pill-total { background:#f6f8fe; }
   .pill-filtered { background:#f2fbf6; }
@@ -84,11 +83,13 @@ const pageCSS = `
     background:transparent;
   }
 
+  /* ===== GRID DE PACIENTES ===== */
   .patients-grid {
     display:grid;
-    grid-template-columns: repeat(3, minmax(0,1fr));
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
     gap:16px;
     width: 100%;
+    box-sizing: border-box; /* evita que crezca más que el viewport */
   }
 
   .card {
@@ -128,7 +129,7 @@ const pageCSS = `
     border-radius:999px;
     border:1px solid var(--line-soft,#e6ebf3);
     background:#f8fafc;
-    font-size:12px;
+    font-size:10px;
   }
 
   .empty-text {
@@ -150,24 +151,30 @@ const pageCSS = `
 
   /* Tablet */
   @media (max-width: 1024px) {
-    .patients-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
+    .patients-grid {
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    }
   }
 
   /* Móvil */
-  @media (max-width: 640px) {
-    .page-pad { padding: 12px; }
+  @media (max-width: 440px) {
+    .page-pad { padding: 8px 0px; }
 
     .page-inner {
-      padding: 0 4px; /* un pelín de aire lateral en cel */
+      padding: 0px;           /* que use todo el ancho disponible */
     }
 
-    .pillbar { gap:8px; }
-    .pill { padding:6px 10px; font-size:12px; }
+    .pillbar { gap:4px; }
+    .pill { padding:3px 4px; font-size:12px; }
     .pill-search input { min-width:110px; font-size:12px; }
 
     .patients-grid {
-      grid-template-columns: 1fr;
+      grid-template-columns: 1fr;  /* siempre 1 por fila en cel */
       gap:12px;
+    }
+
+    .card {
+      border-radius:14px;
     }
 
     .item-avatar {
@@ -175,8 +182,8 @@ const pageCSS = `
       height:40px;
       font-size:14px;
     }
-    .item-title { font-size:14px; }
-    .item-meta { font-size:12px; }
+    .item-title { font-size:10px; }
+    .item-meta { font-size:10px; }
     .id-pill {
       font-size:11px;
       padding:5px 8px;
@@ -186,6 +193,7 @@ const pageCSS = `
     .mobile-hide { display:none !important; }
   }
 `;
+
 
 export default function PatientList() {
   const navigate = useNavigate();

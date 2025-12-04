@@ -23,7 +23,12 @@ const pageCSS = `
 
   .pillbar { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
   .pillbar-left,.pillbar-right { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
-  .pill { display:inline-flex; align-items:center; gap:8px; padding:8px 12px; border-radius:999px; border:1px solid var(--line-soft,#e6ebf3); background:#fff; font-weight:600; }
+  .pill {
+    display:inline-flex; align-items:center; gap:8px;
+    padding:8px 12px; border-radius:999px;
+    border:1px solid var(--line-soft,#e6ebf3);
+    background:#fff; font-weight:600;
+  }
   .pill-total { background:#f6f8fe; }
   .pill-filtered { background:#f2fbf6; }
   .pill-primary { background:var(--light-blue,#eaf2ff); border-color:transparent; }
@@ -32,28 +37,186 @@ const pageCSS = `
   .pill-search input { border:0; outline:none; background:transparent; min-width:0; width:100%; }
   .pill-toggle { cursor:pointer; }
 
-  .notes-grid { display:grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap:14px; }
-  .card { background:#fff; border:1px solid var(--line-soft,#e6ebf3); border-radius:16px; box-shadow:0 2px 10px rgba(0,0,0,.04); }
-  .note-card .avatar { width:44px; height:44px; border-radius:999px; display:flex; align-items:center; justify-content:center; font-weight:900; color:#fff; }
-  .id-pill { display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border-radius:999px; border:1px solid var(--line-soft,#e6ebf3); background:#f8fafc; font-size:12px; }
+  /* ===== LISTA DE PACIENTES (ACORDEÓN) ===== */
+  .patients-list {
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+  }
+
+  .patient-accordion {
+    border-radius:14px;
+    border:1px solid var(--line-soft,#e6ebf3);
+    background:#fff;
+    box-shadow:0 1px 6px rgba(15,23,42,0.03);
+    overflow:hidden;
+  }
+
+  .patient-header {
+    width:100%;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    padding:10px 12px;
+    background:#f8fafc;
+    border:none;
+    cursor:pointer;
+  }
+
+  .patient-header-main {
+    display:flex;
+    align-items:center;
+    gap:10px;
+    min-width:0;
+  }
+
+  .patient-header-text {
+    min-width:0;
+  }
+
+  .patient-name {
+    font-weight:600;
+    font-size:14px;
+    white-space:nowrap;
+    text-overflow:ellipsis;
+    overflow:hidden;
+  }
+
+  .patient-meta {
+    font-size:11px;
+    color:#64748b;
+    white-space:nowrap;
+  }
+
+  .patient-chevron {
+    flex-shrink:0;
+    transition:transform .18s ease;
+  }
+  .patient-chevron.open {
+    transform:rotate(90deg);
+  }
+
+  .patient-avatar {
+    width:36px; height:36px;
+    border-radius:999px;
+    display:flex; align-items:center; justify-content:center;
+    font-weight:900; color:#fff;
+    flex-shrink:0;
+    font-size:13px;
+  }
+
+  .patient-sessions {
+    padding:8px 10px 10px;
+    border-top:1px solid #e5e7eb;
+    background:#fff;
+  }
+
+  .session-row {
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:8px;
+    padding:8px 6px;
+    border-radius:10px;
+  }
+
+  .session-row:not(:last-child) {
+    border-bottom:1px dashed #e5e7eb;
+  }
+
+  .session-main {
+    min-width:0;
+  }
+
+  .session-title {
+    font-size:13px;
+    font-weight:600;
+    margin:0 0 2px;
+  }
+
+  .session-meta {
+    font-size:11px;
+    color:#64748b;
+    margin:0 0 4px;
+  }
+
+  .session-preview {
+    font-size:12px;
+    color:#334155;
+    margin:0;
+    line-height:1.35;
+    max-height:3.4em;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    display:-webkit-box;
+    -webkit-line-clamp:2;
+    -webkit-box-orient:vertical;
+  }
+
+  .session-actions {
+    flex-shrink:0;
+    display:flex;
+    align-items:center;
+  }
+
+  .btn-pdf {
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    gap:4px;
+    padding:6px 10px;
+    border-radius:999px;
+    border:1px solid var(--line-soft,#e6ebf3);
+    background:#f8fafc;
+    font-size:11px;
+    cursor:pointer;
+    white-space:nowrap;
+  }
+  .btn-pdf .material-symbols-outlined {
+    font-size:16px;
+  }
 
   /* Tablet */
-  @media (max-width: 1024px) {
-    .notes-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  @media (max-width:1024px){
+    .pill { padding:6px 10px; font-size:12px; }
+    .patient-name { font-size:13px; }
   }
 
   /* Móvil */
-  @media (max-width: 640px) {
-    .page-pad { padding: 10px; }
+  @media (max-width:640px){
+    .page-pad { padding:10px; }
+
+    .pillbar { gap:8px; flex-direction:column; align-items:flex-start; }
     .pill { padding:6px 10px; font-size:12px; }
-    .pillbar { gap:8px; }
-    .notes-grid { grid-template-columns: 1fr; gap:10px; }
-    .note-card .avatar { width:38px; height:38px; font-size:13px; }
-    .note-card .title { font-size:14px; }
-    .note-card .meta { font-size:12px; opacity:.8; }
-    .note-card .preview { font-size:13px; }
-    .id-pill { font-size:11px; padding:5px 8px; }
-    .btn-xs { font-size:12px; padding:6px 10px; }
+
+    .patient-header {
+      padding:9px 10px;
+    }
+
+    .patient-avatar {
+      width:32px; height:32px; font-size:12px;
+    }
+
+    .patient-name { font-size:13px; }
+    .patient-meta { font-size:10px; }
+
+    .patient-sessions { padding:6px 8px 8px; }
+
+    .session-row {
+      flex-direction:row;
+      align-items:flex-start;
+      gap:6px;
+    }
+
+    .session-title { font-size:12px; }
+    .session-meta { font-size:10px; }
+    .session-preview { font-size:11px; }
+
+    .btn-pdf {
+      font-size:10px;
+      padding:5px 8px;
+    }
   }
 `;
 
@@ -86,6 +249,7 @@ function fmtDate(ts) {
     return "—";
   }
 }
+
 
 // Avatar color helpers
 const avatarColors = ["#7c3aed", "#2563eb", "#059669", "#d97706", "#db2777"];
@@ -125,8 +289,11 @@ export default function NotesList() {
   // Datos
   const [notes, setNotes] = useState([]); // cada "note" = una sesión con PDF
   const [patientsMap, setPatientsMap] = useState({});
+  const [openPatientId, setOpenPatientId] = useState(null); // acordeón
 
-  const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8080";
+  const API_BASE =
+    import.meta.env.VITE_API_URL ||
+    "https://orchestrator-826777844588.us-central1.run.app";
 
   // orgId desde perfil / localStorage
   useEffect(() => {
@@ -296,7 +463,7 @@ export default function NotesList() {
       groups[pid].push(n);
     });
 
-    // ordenar cada grupo por fecha desc (por si acaso)
+    // ordenar cada grupo por fecha desc
     Object.values(groups).forEach((arr) => {
       arr.sort((a, b) => {
         const ad =
@@ -355,34 +522,22 @@ export default function NotesList() {
   }
 
   const rightActions = (
-    <div className="flex-row-center">
-      <button
-        onClick={() => navigate("/generate-progress-note")}
-        className="btn ghost h-10 hidden sm:inline-flex"
-      >
-        Nueva nota
-      </button>
-      <button
-        onClick={() => navigate("/patient-list")}
-        className="btn ghost h-10 hidden sm:inline-flex"
-      >
-        Ver pacientes
-      </button>
-      <button
-        onClick={async () => {
-          try {
-            setBusyMsg("Cerrando sesión…");
-            await logout();
-            navigate("/login", { replace: true });
-          } finally {
-            setBusyMsg("");
-          }
-        }}
-        className="btn ghost h-10"
-      >
-        Cerrar sesión
-      </button>
-    </div>
+    <button
+      onClick={async () => {
+        try {
+          setBusyMsg("Cerrando sesión…");
+          await logout();
+          navigate("/login", { replace: true });
+        } finally {
+          setBusyMsg("");
+        }
+      }}
+      className="btn ghost h-10 flex items-center gap-2"
+    >
+      <span className="material-symbols-outlined">logout</span>
+      {/* texto solo en pantallas >= sm */}
+      <span className="hidden sm:inline">Cerrar sesión</span>
+    </button>
   );
 
   return (
@@ -484,130 +639,120 @@ export default function NotesList() {
               </p>
             </div>
           ) : (
-            Object.entries(groupedByPatient).map(([patientId, patientNotes]) => {
-              const patientData = patientsMap[patientId];
-              const pName = patientData?.fullName || patientId;
-              const pId = patientData?.id || patientId;
+            <div className="patients-list">
+              {Object.entries(groupedByPatient).map(
+                ([patientId, patientNotes]) => {
+                  const patientData = patientsMap[patientId];
+                  const pName = patientData?.fullName || patientId;
+                  const pId = patientData?.id || patientId;
+                  const isOpen = openPatientId === patientId;
 
-              return (
-                <div key={patientId} className="mb-8">
-                  {/* Encabezado del paciente */}
-                  <div className="flex items-center gap-3 mb-3">
-                    <div
-                      className="avatar"
-                      style={{
-                        ...getAvatarStyle(pId),
-                        width: 44,
-                        height: 44,
-                        borderRadius: 999,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        fontWeight: 900,
-                        color: "#fff",
-                        flexShrink: 0,
-                      }}
-                    >
-                      {pName
-                        ? pName
-                            .split(" ")
-                            .slice(0, 2)
-                            .map((s) => s[0]?.toUpperCase())
-                            .join("")
-                        : "PT"}
-                    </div>
-                    <div>
-                      <h2 className="font-semibold text-base sm:text-lg">
-                        {pName}
-                      </h2>
-                      <p className="text-xs text-gray-500">
-                        ID paciente: {pId} · Sesiones: {patientNotes.length}
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Cards de sesiones de este paciente */}
-                  <div className="notes-grid">
-                    {patientNotes.map((n) => {
-                      const ts =
-                        n.data?.signed_at_ts ||
-                        n.data?.processed_at ||
-                        n.data?.created_at;
-                      const preview = (
-                        n.data?.evolution_note_txt || ""
-                      ).slice(0, 160);
-
-                      return (
-                        <div key={n.meta.sessionId} className="card note-card p-4">
-                          <div className="min-w-0">
-                            <p className="title truncate font-semibold text-sm sm:text-base">
-                              Sesión {n.meta.sessionId}
-                            </p>
-                            <p className="meta text-xs text-gray-500">
-                              {fmtDate(ts)}
-                            </p>
+                  return (
+                    <div key={patientId} className="patient-accordion">
+                      {/* Header clickeable */}
+                      <button
+                        type="button"
+                        className="patient-header"
+                        onClick={() =>
+                          setOpenPatientId((prev) =>
+                            prev === patientId ? null : patientId
+                          )
+                        }
+                      >
+                        <div className="patient-header-main">
+                          <div
+                            className="patient-avatar"
+                            style={getAvatarStyle(pId)}
+                          >
+                            {pName
+                              ? pName
+                                  .split(" ")
+                                  .slice(0, 2)
+                                  .map((s) => s[0]?.toUpperCase())
+                                  .join("")
+                              : "PT"}
                           </div>
-
-                          {preview && (
-                            <p className="preview mt-3 line-clamp-3 text-sm">
-                              {preview}
-                              {preview.length >= 160 ? "…" : ""}
-                            </p>
-                          )}
-
-                          <div className="mt-4 flex items-center justify-between gap-2">
-                            <span className="id-pill">
-                              <span className="material-symbols-outlined">
-                                fingerprint
-                              </span>
-                              Sesión: {n.meta.sessionId}
-                            </span>
-                            <div className="flex gap-2">
-                              <button
-                                onClick={() =>
-                                  openSignedPdf({
-                                    orgId: n.meta.orgId,
-                                    patientId: n.meta.patientId,
-                                    sessionId: n.meta.sessionId,
-                                  })
-                                }
-                                className="pill pill-ghost btn-xs"
-                                title="Abrir PDF firmado"
-                              >
-                                <span className="material-symbols-outlined">
-                                  picture_as_pdf
-                                </span>
-                                PDF
-                              </button>
-
-                              <button
-                                onClick={() =>
-                                  navigate("/patient-progress-note-overview", {
-                                    state: {
-                                      orgId: n.meta.orgId,
-                                      patientId: n.meta.patientId,
-                                      sessionId: n.meta.sessionId,
-                                      // Si quieres mostrar emociones, aquí aún no las tenemos.
-                                      // Podrías hacer un fetch extra a Firestore dentro de esa vista.
-                                      noteId: n.meta.sessionId,
-                                      analisis: null,
-                                      text: n.data?.evolution_note_txt || "",
-                                    },
-                                  })
-                                }
-                                className="pill pill-primary btn-xs"
-                              >
-                                Ver detalle
-                              </button>
+                          <div className="patient-header-text">
+                            <div className="patient-name">{pName}</div>
+                            <div className="patient-meta">
+                              {patientNotes.length} PDF
+                              {patientNotes.length !== 1 ? "s" : ""} firmados
                             </div>
                           </div>
                         </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })
+
+                        <div className="flex items-center">
+                          <span
+                            className={
+                              "material-symbols-outlined patient-chevron" +
+                              (isOpen ? " open" : "")
+                            }
+                          >
+                            chevron_right
+                          </span>
+                        </div>
+                      </button>
+
+                      {/* Sesiones desplegables */}
+                      {isOpen && (
+                        <div className="patient-sessions">
+                          {patientNotes.map((n) => {
+                            const ts =
+                              n.data?.signed_at_ts ||
+                              n.data?.processed_at ||
+                              n.data?.created_at;
+                            const preview = "";
+
+                            return (
+                              <div
+                                key={n.meta.sessionId}
+                                className="session-row"
+                              >
+                                <div className="session-main">
+                                  <p className="session-title">
+                                    Sesión {n.meta.sessionId}
+                                  </p>
+                                  <p className="session-meta">
+                                    {fmtDate(ts)}
+                                  </p>
+                                  {preview && (
+                                    <p className="session-preview">
+                                      {preview}
+                                      {preview.length >= 200 ? "…" : ""}
+                                    </p>
+                                  )}
+                                </div>
+
+                                <div className="session-actions">
+                                  <button
+                                    onClick={() =>
+                                      openSignedPdf({
+                                        orgId: n.meta.orgId,
+                                        patientId: n.meta.patientId,
+                                        sessionId: n.meta.sessionId,
+                                      })
+                                    }
+                                    className="btn-pdf"
+                                    title="Abrir PDF firmado"
+                                  >
+                                    <span className="material-symbols-outlined">
+                                      picture_as_pdf
+                                    </span>
+                                    <span className="hidden sm:inline">
+                                      PDF
+                                    </span>
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                }
+              )}
+            </div>
           )}
         </section>
       )}

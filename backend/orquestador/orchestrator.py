@@ -13,12 +13,14 @@ import html
 from fastapi import (
     FastAPI, File, UploadFile, HTTPException, Header, Form, Depends, Request, Body
 )
+import json
+from google.oauth2 import service_account
+from google.auth import default as google_auth_default
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import httpx
-
 import firebase_admin
 from firebase_admin import credentials, auth
 from google.cloud import firestore
@@ -63,6 +65,43 @@ except Exception as e:
 
 security = HTTPBearer()
 
+# Intentamos primero usar una service account key JSON "real" para firmar URLs
+SIGNED_URL_CREDS = None
+
+try:
+    # 👇 Default: usamos el JSON que copiaste en el Dockerfile
+    SA_KEY_PATH = os.getenv(
+        "SIGNED_URL_KEY_PATH",  # nombre de la env var
+        "/app/terapia-471517-8474c5fd5787.json",  # default real que SÍ existe
+    )
+
+    if os.path.exists(SA_KEY_PATH):
+        logger.info(f"[signed_url] Usando service account key desde archivo: {SA_KEY_PATH}")
+        SIGNED_URL_CREDS = service_account.Credentials.from_service_account_file(
+            SA_KEY_PATH,
+            scopes=["https://www.googleapis.com/auth/devstorage.read_only"],
+        )
+    else:
+        SA_KEY_JSON = os.getenv("SIGNED_URL_KEY_JSON")
+        if SA_KEY_JSON:
+            logger.info("[signed_url] Usando service account key desde SIGNED_URL_KEY_JSON")
+            SIGNED_URL_CREDS = service_account.Credentials.from_service_account_info(
+                json.loads(SA_KEY_JSON),
+                scopes=["https://www.googleapis.com/auth/devstorage.read_only"],
+            )
+        else:
+            # 🚫 Nada de ADC aquí: si no hay key, es un error de config.
+            raise RuntimeError(
+                f"No se encontró key para firmar URLs. "
+                f"SA_KEY_PATH={SA_KEY_PATH}, SIGNED_URL_KEY_JSON vacío."
+            )
+
+    logger.info(f"[signed_url] Tipo de credenciales para firma: {type(SIGNED_URL_CREDS)}")
+except Exception as e:
+    logger.error(f"[signed_url] Error creando SIGNED_URL_CREDS: {e}", exc_info=True)
+    SIGNED_URL_CREDS = None
+
+
 async def get_current_user(cred: HTTPAuthorizationCredentials = Depends(security)):
     if not cred:
         raise HTTPException(status_code=401, detail="Falta el token de autorización")
@@ -101,10 +140,8 @@ READ_TIMEOUT = float(os.getenv("ORC_READ_TIMEOUT", "120"))
 app = FastAPI(title="Orquestador (Foto→OCR→Análisis | Audio→Transcripción→Análisis)")
 #FRONTEND_ORIGIN = ["https://frontend-826777844588.us-central1.run.app"]
 ALLOWED_ORIGINS = [
-    "http://localhost:5173", # Puerto de Vite (Desarrollo)
-    "http://127.0.0.1:5173", # Variación de localhost
-    "http://localhost:8080", # El propio orquestador
-    "http://127.0.0.1:8080",
+
+
     # --- AÑADE TU URL DE PRODUCCIÓN DE CLOUD RUN AQUÍ ---
     "https://frontend-826777844588.us-central1.run.app"
 ]
@@ -112,11 +149,11 @@ ALLOWED_ORIGINS = [
 app.add_middleware(
     CORSMiddleware,
     # Usamos la lista explícita para la seguridad
-    allow_origins=ALLOWED_ORIGINS, 
+    allow_origins= ALLOWED_ORIGINS , 
     # Mantenemos las opciones de seguridad necesarias para la autenticación
     allow_credentials=True,
-    allow_methods=["*"], 
-    allow_headers=["*"], # Necesario para enviar el token 'Authorization'
+    allow_methods=["*"],
+    allow_headers=["*"], 
 )
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -168,7 +205,7 @@ class FinalizarSesionPayload(BaseModel):
     soap_input: DoctorSOAPInput
 
 class SignedPdfIn(BaseModel):
-    org_id: str = File(..., description="Nombre de la organización (puede tener espacios)")
+    org_id: str 
     patient_id: str
     session_id: str
 
@@ -244,7 +281,6 @@ def build_forward_headers(authorization: Optional[str], uid: Optional[str]) -> D
 
 # ──────────────────────────────────────────────────────────────────────────────
 from datetime import timedelta
-from pydantic import BaseModel, Field
 
 def build_pdf_object_name(org_id: str, doctor_uid: str, patient_id: str, session_id: str) -> str:
     return f"{org_id}/{doctor_uid}/{patient_id}/sessions/{session_id}/derived/evolution/evolution_note_{session_id}.pdf"
@@ -255,14 +291,28 @@ def object_exists(bucket_name: str, object_name: str) -> bool:
     return blob.exists(storage_client)
 
 def generate_signed_get_url(bucket_name: str, object_name: str, expires_seconds: int = 300) -> str:
+    if not SIGNED_URL_CREDS:
+        logger.error("[signed_url] SIGNED_URL_CREDS es None, no se puede firmar")
+        raise HTTPException(status_code=500, detail="Config error: no hay credenciales para firmar PDFs")
+
     bucket = storage_client.bucket(bucket_name)
     blob = bucket.blob(object_name)
-    return blob.generate_signed_url(
+
+    logger.info(
+        f"[signed_url] Firmando gs://{bucket_name}/{object_name} con creds tipo {type(SIGNED_URL_CREDS)}"
+    )
+
+    url = blob.generate_signed_url(
         version="v4",
         expiration=timedelta(seconds=expires_seconds),
         method="GET",
         response_disposition=f'inline; filename="{Path(object_name).name}"',
+        # 👇 LO IMPORTANTE: usar credenciales con llave privada
+        credentials=SIGNED_URL_CREDS,
     )
+    return url
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 
 def formatear_analisis_html(analisis: dict) -> str:
@@ -601,8 +651,14 @@ async def signed_pdf_url(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"[signed_pdf_url] Error firmando {object_name}: {e}")
-        raise HTTPException(status_code=500, detail="No se pudo firmar el PDF")
+        logger.error(
+            f"[signed_pdf_url] Error firmando URL para gs://{BUCKET_NAME}/{object_name}: {e}",
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"No se pudo firmar el PDF: {e}",
+        )
 
 # ──────────────────────────────────────────────────────────────────────────────
 @app.get("/health")

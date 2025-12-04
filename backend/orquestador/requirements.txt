@@ -12,3 +12,4 @@ google-cloud-bigquery>=3.10.0
 fpdf2>=2.7.0
 weasyprint
 jinja2
+google-auth>=2.20.0

@@ -29,6 +29,17 @@ export default function MainDashboard() {
 
   /* ========= CSS solo para este dashboard ========= */
   const pageCSS = `
+    /* Contenedor común para centrar contenido como en PatientList */
+    .md-page {
+      padding: 16px;
+      display: flex;
+      justify-content: center;
+    }
+    .md-page-inner {
+      width: 100%;
+      max-width: 1120px;
+    }
+
     /* Nombre del doctor – que nunca desborde */
     .md-dashboard-name{
       display:block;
@@ -38,20 +49,17 @@ export default function MainDashboard() {
       max-width:100%;
     }
 
-    /* Envolvente de la sección de perfil para poder centrar en móvil */
-    .md-profile-section{
-      width:100%;
-      overflow-x:hidden;
-    }
-
+    /* Card de perfil / métricas
+       - full width dentro de md-page-inner en desktop
+       - SIN margin-left global de .card
+    */
     .md-profile-card{
       width:100%;
-      max-width:720px;
-      margin:0 auto;
+      margin-left:0px;
+      margin-right:5px;
     }
 
     .md-profile-stats .stat{
-      /* un poco más compactas que el default */
       padding:10px;
     }
 
@@ -59,9 +67,9 @@ export default function MainDashboard() {
     .md-actions-stack{
       display:grid;
       grid-template-columns:repeat(4, minmax(150px, 1fr));
-      column-gap:32px;
+      column-gap:50px;
       row-gap:24px;
-      padding:12px 0;
+      padding:10px 0;
     }
 
     @media (max-width:1024px){
@@ -73,14 +81,19 @@ export default function MainDashboard() {
     }
 
     @media (max-width:640px){
-      .md-profile-section{
-        padding-left:12px !important;
-        padding-right:12px !important;
+      .md-page {
+        padding: 12px;
       }
+
+      .md-page-inner {
+        padding: 0 4px;      /* aire a ambos lados en cel */
+      }
+
       .md-profile-card{
-        max-width:320px;          /* 👈 más estrecho en móvil */
-        margin:12px auto 8px;
+        max-width: 260px;    
+        margin: 12px auto 8px;
       }
+
       .md-profile-name{
         font-size:16px !important;
       }
@@ -88,24 +101,14 @@ export default function MainDashboard() {
         padding:8px;
       }
 
-      .md-actions-section{
-        padding-left:12px !important;
-        padding-right:12px !important;
-      }
-      .md-actions-inner{
-        width:100%;
-        max-width:320px;          /* 👈 mismas “paredes” que la card de perfil */
-        margin:0 auto;
-      }
-
       .md-actions-stack{
         grid-template-columns:1fr;
-        column-gap:10px;
-        row-gap:12px;
+        column-gap:14px;
+        row-gap:11px;
         padding:8px 0;
       }
       .md-actions-stack .action-card{
-        width:100% !important;
+        width:90% !important;
         min-width:0 !important;
         min-height:100px !important;
         padding:12px !important;
@@ -206,7 +209,7 @@ export default function MainDashboard() {
   }, [user?.uid, orgId]);
 
   const statPatients = useMemo(() => patientsCount ?? 0, [patientsCount]);
-  const statNotes = useMemo(() => notesCount ?? 0, [notesCount]);
+  const statNotes   = useMemo(() => notesCount ?? 0, [notesCount]);
 
   const handleLogout = async () => {
     try {
@@ -225,17 +228,14 @@ export default function MainDashboard() {
     navigate(path);
   };
 
-  // Header igual que en otras vistas: logo TerappIA + Cerrar sesión
+  // Header igual que en otras vistas
   const rightActions = (
     <button
       onClick={handleLogout}
       className="btn ghost h-10"
       title="Cerrar sesión"
     >
-      <span
-        className="material-symbols-outlined"
-        style={{ marginRight: 6 }}
-      >
+      <span className="material-symbols-outlined" style={{ marginRight: 6 }}>
         logout
       </span>
       Cerrar sesión
@@ -270,109 +270,117 @@ export default function MainDashboard() {
         />
 
         {/* ===== Perfil + métricas ===== */}
-        <section
-          className="container-pad maxw-7xl md-profile-section"
-          style={{ paddingTop: 16 }}
-        >
-          <div className="card md-profile-card" style={{ padding: 16 }}>
-            <div className="flex items-center gap-3">
-              <img
-                src={photoURL}
-                alt="Foto"
-                className="sidebar-avatar"
-                style={{
-                  width: 48,
-                  height: 48,
-                  borderRadius: 9999,
-                  objectFit: "cover",
-                  flexShrink: 0,
-                }}
-              />
-              <div className="min-w-0 flex-1">
-                <h2
-                  className="md-dashboard-name md-profile-name"
+        <section className="md-page">
+          <div className="md-page-inner">
+            <div className="card md-profile-card" style={{ padding: 16 }}>
+              <div className="flex items-center gap-3">
+                <img
+                  src={photoURL}
+                  alt="Foto"
+                  className="sidebar-avatar"
                   style={{
-                    margin: 0,
-                    fontSize: 18,
-                    lineHeight: 1.2,
-                    fontWeight: 800,
+                    width: 48,
+                    height: 48,
+                    borderRadius: 9999,
+                    objectFit: "cover",
+                    flexShrink: 0,
                   }}
-                  title={name || user?.displayName || "Usuario"}
-                >
-                  {name || user?.displayName || "Usuario"}
-                </h2>
-                <p
-                  className="caption text-muted truncate"
-                  style={{ margin: 0, maxWidth: "100%" }}
-                >
-                  Org: {orgId || "Sin organización"}
-                </p>
+                />
+                <div className="min-w-0 flex-1">
+                  <h2
+                    className="md-dashboard-name md-profile-name"
+                    style={{
+                      margin: 0,
+                      fontSize: 18,
+                      lineHeight: 1.2,
+                      fontWeight: 800,
+                    }}
+                    title={name || user?.displayName || "Usuario"}
+                  >
+                    {name || user?.displayName || "Usuario"}
+                  </h2>
+                  <p
+                    className="caption text-muted truncate"
+                    style={{ margin: 0, maxWidth: "100%" }}
+                  >
+                    Org: {orgId || "Sin organización"}
+                  </p>
+                </div>
               </div>
-            </div>
 
-            {/* Stats */}
-            <div
-              className="stats-grid md-profile-stats"
-              style={{ marginTop: 12 }}
-            >
-              <div className="stat">
-                <div style={{ fontSize: 22, fontWeight: 900, lineHeight: 1 }}>
-                  {loadingStats ? "—" : statPatients}
+              {/* Stats */}
+              <div
+                className="stats-grid md-profile-stats"
+                style={{ marginTop: 12 }}
+              >
+                <div className="stat">
+                  <div
+                    style={{ fontSize: 22, fontWeight: 900, lineHeight: 1 }}
+                  >
+                    {loadingStats ? "—" : statPatients}
+                  </div>
+                  <div className="caption text-muted">Pacientes</div>
                 </div>
-                <div className="caption text-muted">Pacientes</div>
-              </div>
-              <div className="stat">
-                <div style={{ fontSize: 22, fontWeight: 900, lineHeight: 1 }}>
-                  {loadingStats ? "—" : statNotes}
+                <div className="stat">
+                  <div
+                    style={{ fontSize: 22, fontWeight: 900, lineHeight: 1 }}
+                  >
+                    {loadingStats ? "—" : statNotes}
+                  </div>
+                  <div className="caption text-muted">Notas</div>
                 </div>
-                <div className="caption text-muted">Notas</div>
-              </div>
-              <div className="stat">
-                <div style={{ fontSize: 22, fontWeight: 900, lineHeight: 1 }}>
-                  {loadingStats ? "—" : Math.max(statNotes - 0, 0)}
+                <div className="stat">
+                  <div
+                    style={{ fontSize: 22, fontWeight: 900, lineHeight: 1 }}
+                  >
+                    {loadingStats ? "—" : Math.max(statNotes - 0, 0)}
+                  </div>
+                  <div className="caption text-muted">
+                    Sesiones (aprox.)
+                  </div>
                 </div>
-                <div className="caption text-muted">Sesiones (aprox.)</div>
-              </div>
-              <div className="stat">
-                <div style={{ fontSize: 22, fontWeight: 900, lineHeight: 1 }}>
-                  —
+                <div className="stat">
+                  <div
+                    style={{ fontSize: 22, fontWeight: 900, lineHeight: 1 }}
+                  >
+                    —
+                  </div>
+                  <div className="caption text-muted">Archivos sesión</div>
                 </div>
-                <div className="caption text-muted">Archivos sesión</div>
               </div>
             </div>
           </div>
         </section>
 
         {/* ===== Acciones (grid responsivo) ===== */}
-        <section
-          className="container-pad maxw-7xl md-actions-section"
-          style={{ paddingTop: 10 }}
-        >
-          <div className="md-actions-inner md-actions-stack">
-            <ActionCard
-              icon="add_notes"
-              title="Nueva nota"
-              desc="Inicia una nota de evolución por OCR o audio."
-              onClick={() => go("/generate-progress-note")}
-            />
-            <ActionCard
-              icon="group"
-              title="Pacientes"
-              desc="Consulta y gestiona tus pacientes."
-              onClick={() => go("/patient-list")}
-            />
-            <ActionCard
-              icon="notes"
-              title="Notas"
-              desc="Revisa tus notas guardadas y el análisis."
-              onClick={() => go("/notes")}
-            />
-            <ActionCard
-              icon="folder_open"
-              title="Archivos"
-              desc="(Próximamente) Explora imágenes y audios."
-              onClick={() => {}}
-            />
+        <section className="md-page">
+          <div className="md-page-inner">
+            <div className="md-actions-stack">
+              <ActionCard
+                icon="add_notes"
+                title="Nueva nota"
+                desc="Inicia una nota de evolución por OCR o audio."
+                onClick={() => go("/generate-progress-note")}
+              />
+              <ActionCard
+                icon="group"
+                title="Pacientes"
+                desc="Consulta y gestiona tus pacientes."
+                onClick={() => go("/patient-list")}
+              />
+              <ActionCard
+                icon="notes"
+                title="Notas"
+                desc="Revisa tus notas guardadas y el análisis."
+                onClick={() => go("/notes")}
+              />
+              <ActionCard
+                icon="folder_open"
+                title="Archivos"
+                desc="(Próximamente) Explora imágenes y audios."
+                onClick={() => {}}
+              />
+            </div>
           </div>
         </section>
       </AppLayout>

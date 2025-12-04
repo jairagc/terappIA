@@ -11,6 +11,17 @@ import {
 import { auth } from "../services/firebaseConfig";
 import { useAuth } from "../context/AuthContext";
 
+const loginCSS = `
+  @media (max-width: 640px) {
+    /* Tarjeta más compacta en móvil */
+    .login-card {
+      max-width: 340px !important;
+      padding: 20px !important;
+      border-radius: 16px !important;
+    }
+  }
+`;
+
 export default function LoginScreen() {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -71,111 +82,114 @@ export default function LoginScreen() {
   };
 
   return (
-    <div
-      className="
-        login-container
-        min-h-screen
-        flex items-center justify-center
-        px-4 sm:px-6
-        bg-[var(--bg-alt)]
-      "
-    >
+    <>
+      {/* Overrides específicos para el login */}
+      <style>{loginCSS}</style>
+
       <div
         className="
-          card login-card
-          w-full
-          max-w-md sm:max-w-lg
-          p-5 sm:p-8
-          rounded-2xl
+          login-container
+          flex items-center justify-center
+          px-4 sm:px-6
         "
       >
-        {/* Logo + títulos */}
-        <div className="flex flex-col items-center gap-1 mb-4">
-          <div className="login-avatar mb-2">
-            <span className="material-symbols-outlined">neurology</span>
-          </div>
-          <h1 className="h2 text-xl sm:text-2xl mb-0">TerappIA</h1>
-          <p className="text-sm sm:text-base text-[var(--text-muted)]">
-            {isRegistering ? "Crear cuenta" : "Iniciar sesión"}
-          </p>
-        </div>
-
-        {/* Form email/password */}
-        <form
-          onSubmit={handleEmailPass}
-          className="grid gap-3 sm:gap-4 mt-2"
+        <div
+          className="
+            card login-card
+            w-full
+            max-w-md sm:max-w-lg
+            rounded-2xl
+          "
         >
-          <label className="form-field text-sm sm:text-base">
-            <span className="label text-xs sm:text-sm">Email</span>
-            <input
-              type="email"
-              className="input h-11 sm:h-12 text-sm sm:text-base"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-            />
-          </label>
+          {/* Logo + títulos */}
+          <div className="flex flex-col items-center gap-1 mb-4">
+            <div className="login-avatar mb-2">
+              <span className="material-symbols-outlined">neurology</span>
+            </div>
+            <h1 className="h2 text-xl sm:text-2xl mb-0">TerappIA</h1>
+            <p className="text-sm sm:text-base text-[var(--text-muted)]">
+              {isRegistering ? "Crear cuenta" : "Iniciar sesión"}
+            </p>
+          </div>
 
-          <label className="form-field text-sm sm:text-base">
-            <span className="label text-xs sm:text-sm">Password</span>
-            <input
-              type="password"
-              className="input h-11 sm:h-12 text-sm sm:text-base"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              minLength={6}
-            />
-          </label>
-
-          <button
-            type="submit"
-            className="btn primary h-11 sm:h-12 text-sm sm:text-base mt-1"
+          {/* Form email/password */}
+          <form
+            onSubmit={handleEmailPass}
+            className="grid gap-3 sm:gap-4 mt-2"
           >
-            {isRegistering ? "Crear cuenta" : "Iniciar sesión"}
-          </button>
-        </form>
+            <label className="form-field text-sm sm:text-base">
+              <span className="label text-xs sm:text-sm">Email</span>
+              <input
+                type="email"
+                className="input h-11 sm:h-12 text-sm sm:text-base"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
+            </label>
 
-        {/* Separador */}
-        <div className="mt-5 sm:mt-6 flex items-center gap-3">
-          <div className="flex-1 h-px bg-[var(--ring)]" />
-          <span className="caption text-muted text-[11px] sm:text-xs">o</span>
-          <div className="flex-1 h-px bg-[var(--ring)]" />
+            <label className="form-field text-sm sm:text-base">
+              <span className="label text-xs sm:text-sm">Password</span>
+              <input
+                type="password"
+                className="input h-11 sm:h-12 text-sm sm:text-base"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                minLength={6}
+              />
+            </label>
+
+            <button
+              type="submit"
+              className="btn primary h-11 sm:h-12 text-sm sm:text-base mt-1 w-full"
+            >
+              {isRegistering ? "Crear cuenta" : "Iniciar sesión"}
+            </button>
+          </form>
+
+          {/* Separador */}
+          <div className="mt-5 sm:mt-6 flex items-center gap-3">
+            <div className="flex-1 h-px bg-[var(--ring)]" />
+            <span className="caption text-muted text-[11px] sm:text-xs">o</span>
+            <div className="flex-1 h-px bg-[var(--ring)]" />
+          </div>
+
+          {/* Botón Google + toggle registrar/iniciar */}
+          <div className="mt-5 sm:mt-6 grid gap-3 sm:gap-4">
+            <button
+              type="button"
+              onClick={handleGoogle}
+              className="btn-google h-11 sm:h-12 text-sm sm:text-base w-full flex items-center justify-center gap-3"
+            >
+              <img
+                src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg"
+                alt=""
+                className="google-icon"
+              />
+              <span className="google-text">Iniciar con Google</span>
+            </button>
+
+
+            <button
+              type="button"
+              onClick={() => setIsRegistering((s) => !s)}
+              className="btn ghost h-11 sm:h-12 text-xs sm:text-sm w-full"
+            >
+              {isRegistering
+                ? "¿Ya tienes cuenta? Inicia sesión"
+                : "¿No tienes cuenta? Crear una"}
+            </button>
+          </div>
+
+          {/* Error */}
+          {err && (
+            <p className="caption text-[11px] sm:text-xs text-center mt-4 text-[#d94848]">
+              {err}
+            </p>
+          )}
         </div>
-
-        {/* Botón Google + toggle registrar/iniciar */}
-        <div className="mt-5 sm:mt-6 grid gap-3 sm:gap-4">
-          <button
-            type="button"
-            onClick={handleGoogle}
-            className="btn-google h-11 sm:h-12 text-sm sm:text-base"
-          >
-            <img
-              src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg"
-              alt=""
-              className="btn-google img"
-            />
-            Iniciar con Google
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setIsRegistering((s) => !s)}
-            className="btn ghost h-11 sm:h-12 text-xs sm:text-sm"
-          >
-            {isRegistering
-              ? "¿Ya tienes cuenta? Inicia sesión"
-              : "¿No tienes cuenta? Crear una"}
-          </button>
-        </div>
-
-        {/* Error */}
-        {err && (
-          <p className="caption text-[11px] sm:text-xs text-center mt-4 text-[#d94848]">
-            {err}
-          </p>
-        )}
       </div>
-    </div>
+    </>
   );
 }

@@ -31,6 +31,7 @@ const pageCSS = `
     display: flex;
     flex-direction: column;
     align-items: stretch; /* <- textarea se estira a todo el ancho */
+    margin:20px 0px 20px 0px;
   }
 
   .review-title {
@@ -87,7 +88,7 @@ const pageCSS = `
   }
 
   .note-area {
-    width: 100%;
+    width: 100%px;
     max-width: 100%;           /* <- quita el límite de ancho */
     box-sizing: border-box;
     border-radius: 12px;
@@ -97,7 +98,7 @@ const pageCSS = `
     resize: vertical;
     font-size: 14px;
     line-height: 1.45;
-    margin: 12px 0 0 0;        /* <- nada de margin auto */
+    margin: 12px 30px 10px 0px;        /* <- nada de margin auto */
     text-align: left;
   }
 
@@ -105,7 +106,6 @@ const pageCSS = `
     outline: 2px solid var(--accent-blue, #2156e6);
     outline-offset: 1px;
   }
-
   @media (max-width: 640px) {
     .review-root {
       padding: 12px;
@@ -126,8 +126,9 @@ const pageCSS = `
     }
 
     .review-card {
-      padding: 12px 12px 14px 14px; 
+      padding: 12px 12px 14px 14px;
       border-radius: 14px;
+      margin:12px 0px 14px 0px;
     }
 
     .review-toolbar {
@@ -142,7 +143,7 @@ const pageCSS = `
 
     .note-area {
       min-height: 180px;
-      width: 90%;
+      min-width: 100%;
       font-size: 13px;
     }
 
@@ -154,15 +155,19 @@ const pageCSS = `
     .review-actions .btn {
       width: 100%;
       justify-content: center;
+      align-items: center;
       height: 44px;
       font-size: 14px;
+      
+      margin-bottom:13px;
     }
 
     .review-json {
-      font-size: 11px;
-      padding: 8px 10px;
+      font-size: 1px;
+      padding: 5px 10px;
     }
   }
+
 `;
 
 
@@ -326,7 +331,8 @@ export default function ReviewText() {
               <button
                 type="button"
                 onClick={() => setShowJSON((v) => !v)}
-                className="btn ghost h-9 text-xs sm:text-sm"
+                className="btn ghost text-xs sm:ts-sm"
+                style={{ fontSize: 11 }}
               >
                 {showJSON
                   ? "Ocultar análisis (JSON)"

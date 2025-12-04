@@ -59,7 +59,7 @@ export default function GenerateProgressNote() {
 
     /* Encabezado parecido a Settings (usa section-title) */
     .note-main-title {
-      margin: 0 0 8px 0;
+      margin: 0 0 18px 0;
     }
 
     /* KPIs arriba */
@@ -67,12 +67,12 @@ export default function GenerateProgressNote() {
       display: flex;
       flex-wrap: wrap;
       gap: 10px;
-      margin-top: 6px;
+      margin-top: 10px;
     }
     .note-kpi {
       display: inline-flex;
       align-items: center;
-      gap: 6px;
+      gap: 5px;
       border-radius: var(--radius-pill);
       padding: 6px 10px;
       font-weight: 700;
@@ -95,8 +95,10 @@ export default function GenerateProgressNote() {
     .note-doctor-card {
       display: flex;
       align-items: center;
-      gap: 10px;
-      padding: 8px 12px;
+      gap: 4px;
+      padding: 20px 12px;
+      margin-top: 20px;
+      margin-bottom: 20px;
       border-radius: var(--radius-card);
       border: 1px solid var(--ring);
       background: var(--surface-2);
@@ -123,7 +125,7 @@ export default function GenerateProgressNote() {
       display: flex;
       flex-wrap: wrap;
       gap: 12px;
-      margin-top: 18px;
+      margin-top: 12px;
       align-items: flex-end;
     }
     .note-patient-select-wrap {
@@ -143,7 +145,9 @@ export default function GenerateProgressNote() {
     .note-btn-pill {
       border-radius: var(--radius-pill);
       height: 44px;
-      padding: 0 22px;
+      margin-top: 20px;
+      margin-bottom: 20px;
+      padding: 0px 22px;
       display: inline-flex;
       align-items: center;
       justify-content: center;
@@ -172,7 +176,7 @@ export default function GenerateProgressNote() {
       border-radius: var(--radius-card);
       padding: 14px;
       display: flex;
-      gap: 12px;
+      gap: 8px;
       align-items: center;
       box-shadow: var(--elev-1);
       transition: transform .08s ease, box-shadow .12s ease;
@@ -208,7 +212,7 @@ export default function GenerateProgressNote() {
       border-radius: var(--radius-pill);
       height: 46px;
       padding: 0 24px;
-      font-weight: 800;
+      font-weight: 700;
     }
 
     /* MOBILE */
